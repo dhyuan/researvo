@@ -1,9 +1,16 @@
+import type { Metadata } from "next";
 import { FileCheck2, FileClock, FlaskConical, RadioTower } from "lucide-react";
 
 import { LinkButton } from "@/components/ui/Button";
 import { SurveyList } from "@/components/workspace/SurveyList";
 import { requirePublisher } from "@/lib/auth/currentUser";
 import { getWorkspaceSurveys } from "@/lib/surveys/surveyListService";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: "Workspace | Researvo",
+  },
+};
 
 type WorkspacePageProps = {
   searchParams?: Promise<{ filter?: string }>;

@@ -1,8 +1,15 @@
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { PublisherProfileForm } from "@/components/profile/PublisherProfileForm";
 import { requirePublisher } from "@/lib/auth/currentUser";
 import { getPublisherProfile, updatePublisherProfile, type PublisherProfileInput } from "@/lib/profile/profileService";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: "Profile | Researvo",
+  },
+};
 
 function readOptionalString(formData: FormData, key: keyof PublisherProfileInput) {
   const value = formData.get(key);

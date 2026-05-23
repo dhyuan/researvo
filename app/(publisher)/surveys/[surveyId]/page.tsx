@@ -1,4 +1,12 @@
+import type { Metadata } from "next";
+
 import { SurveyMaintenanceClient } from "@/components/survey/SurveyMaintenanceClient";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: "Survey Editor | Researvo",
+  },
+};
 
 type SurveyPageProps = {
   params: Promise<{ surveyId: string }>;

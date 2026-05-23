@@ -1,7 +1,15 @@
+import type { Metadata } from "next";
+
 import { CreationWizard } from "@/components/wizard/CreationWizard";
 import { requirePublisher } from "@/lib/auth/currentUser";
 import { getLatestSurveyVersion } from "@/lib/persistence/repositories";
 import { getOrCreateActiveCreationDraft } from "@/lib/wizard/creationDraftService";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: "New Survey Wizard | Researvo",
+  },
+};
 
 export default async function NewSurveyWizardPage() {
   const user = await requirePublisher();

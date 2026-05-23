@@ -1,9 +1,18 @@
+import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { signIn } from "@/auth";
 import { Button } from "@/components/ui/Button";
 import { Panel } from "@/components/ui/Panel";
 import { getCurrentUser } from "@/lib/auth/currentUser";
+import { SSO_PROVIDER_COOKIE } from "@/lib/analytics/googleAnalytics";
+
+export const metadata: Metadata = {
+  title: {
+    absolute: "Sign In | Researvo",
+  },
+};
 
 export default async function Home() {
   const user = await getCurrentUser();
@@ -15,13 +24,23 @@ export default async function Home() {
   async function signInWithGoogle() {
     "use server";
 
-    await signIn("google", { redirectTo: "/workspace" });
+    (await cookies()).set(SSO_PROVIDER_COOKIE, "google", {
+      maxAge: 15 * 60,
+      path: "/",
+      sameSite: "lax",
+    });
+    await signIn("google", { redirectTo: "/workspace?auth_status=success&auth_provider=google" });
   }
 
   async function signInWithApple() {
     "use server";
 
-    await signIn("apple", { redirectTo: "/workspace" });
+    (await cookies()).set(SSO_PROVIDER_COOKIE, "apple", {
+      maxAge: 15 * 60,
+      path: "/",
+      sameSite: "lax",
+    });
+    await signIn("apple", { redirectTo: "/workspace?auth_status=success&auth_provider=apple" });
   }
 
   return (
@@ -41,12 +60,12 @@ export default async function Home() {
           <p className="mt-2 text-sm leading-6 text-[var(--hs-muted)]">Use your publisher account to open the workspace.</p>
           <div className="mt-6 grid gap-3">
             <form action={signInWithGoogle}>
-              <Button className="w-full" type="submit">
+              <Button className="w-full" data-analytics-label="Sign in with Google" type="submit">
                 Sign in with Google
               </Button>
             </form>
             <form action={signInWithApple}>
-              <Button className="w-full" type="submit" variant="secondary">
+              <Button className="w-full" data-analytics-label="Sign in with Apple" type="submit" variant="secondary">
                 Sign in with Apple
               </Button>
             </form>

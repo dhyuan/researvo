@@ -1,12 +1,7 @@
 import type { ReactNode } from "react";
+import { Mail } from "lucide-react";
 
 import { SidebarNav } from "@/components/app/SidebarNav";
-
-const agentSignals = [
-  "Human workspace",
-  "Agent operable",
-  "Research output",
-];
 
 export function AppShell({ children }: { children: ReactNode }) {
   return (
@@ -56,18 +51,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                     Available not only for humans, but also for AI agents.
                   </p>
                 </div>
-                <div className="hidden shrink-0 items-center gap-2 lg:flex" aria-label="Agent-ready product signals">
-                  {agentSignals.map((signal) => {
-                    return (
-                      <div
-                        className="inline-flex items-center gap-1.5 rounded-full border border-transparent bg-transparent px-1.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--hs-muted)]"
-                        key={signal}
-                      >
-                        <span className="size-1.5 rounded-full bg-[var(--hs-primary)]/55" aria-hidden="true" />
-                        {signal}
-                      </div>
-                    );
-                  })}
+                <div className="hidden shrink-0 items-center gap-2 lg:flex" aria-label="Feedback and contact">
+                  <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--hs-muted)]">
+                    Feed back & Contact us:
+                  </span>
+                  <a
+                    aria-label="Email feedback and contact"
+                    className="inline-flex size-8 items-center justify-center rounded-full text-[var(--hs-muted)] transition-colors duration-200 hover:bg-[var(--hs-primary-soft)] hover:text-[var(--hs-primary-deep)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--hs-primary)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--hs-page)]"
+                    href="mailto:dhyuan@gmail.com"
+                  >
+                    <Mail aria-hidden="true" className="size-4" strokeWidth={1.8} />
+                  </a>
                 </div>
               </div>
               <div className="md:hidden">

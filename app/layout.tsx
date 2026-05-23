@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist } from "next/font/google";
+import Script from "next/script";
 
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -21,6 +22,18 @@ export default function RootLayout({
   return (
     <html lang="en" className={geist.className}>
       <body>
+        <Script async src="https://www.googletagmanager.com/gtag/js?id=G-CMKPF2B2RL" />
+        <Script
+          id="google-analytics"
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.dataLayer = window.dataLayer || [];
+              function gtag(){dataLayer.push(arguments);}
+              gtag('js', new Date());
+              gtag('config', 'G-CMKPF2B2RL');
+            `,
+          }}
+        />
         <TooltipProvider>
           {children}
           <Toaster />

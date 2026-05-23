@@ -6,6 +6,7 @@ const importStepSource = readFileSync("components/wizard/ImportStep.tsx", "utf8"
 const newWizardPageSource = readFileSync("app/(publisher)/surveys/new/wizard/page.tsx", "utf8");
 const publishStepSource = readFileSync("components/wizard/PublishStep.tsx", "utf8");
 const reviewStepSource = readFileSync("components/wizard/ReviewStep.tsx", "utf8");
+const promptStepSource = readFileSync("components/wizard/PromptStep.tsx", "utf8");
 
 describe("CreationWizard", () => {
   it("tracks the survey created by schema autosave", () => {
@@ -61,5 +62,13 @@ describe("CreationWizard", () => {
     expect(source).toContain("Open in Flow Editor");
     expect(source).toContain('href={flowEditorHref}');
     expect(source).toContain(") : (");
+  });
+
+  it("explains where to paste the copied external AI prompt", () => {
+    expect(promptStepSource).toContain("prompt-copy-hint");
+    expect(promptStepSource).toContain("aria-describedby=\"prompt-copy-hint\"");
+    expect(promptStepSource).toContain(
+      "Please copy the generated prompt and paste it into ChatGPT or another AI tool to generate the survey structure data. Then copy the generated data into the “Schema JSON” text box in the next step."
+    );
   });
 });

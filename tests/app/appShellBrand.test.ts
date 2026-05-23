@@ -4,13 +4,16 @@ import { describe, expect, it } from "vitest";
 const source = readFileSync("components/app/AppShell.tsx", "utf8");
 
 describe("AppShell brand header", () => {
-  it("positions Researvo as an agent-ready survey system", () => {
+  it("positions Researvo as an agent-ready survey system with a discreet contact action", () => {
     expect(source).toContain("Agent-native survey operations");
     expect(source).toContain("Available not only for humans, but also for AI agents.");
     expect(source).not.toContain("MCP");
-    expect(source).toContain("Human workspace");
-    expect(source).toContain("Agent operable");
-    expect(source).toContain("Research output");
+    expect(source).not.toContain("Human workspace");
+    expect(source).not.toContain("Agent operable");
+    expect(source).not.toContain("Research output");
+    expect(source).toContain("Feed back & Contact us:");
+    expect(source).toContain("Mail");
+    expect(source).toContain("mailto:dhyuan@gmail.com");
     expect(source).toContain("rounded-full");
   });
 });

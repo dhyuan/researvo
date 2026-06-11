@@ -17,7 +17,7 @@ git reset --soft public_researvo/main
 
 ### 3. 重新打包并强推覆盖
 
-git commit -m "enhance GA"
+git commit -m "add feedback api"
 git push public_researvo force-cover-public:main --force
 
 # 4. 清理现场回到日常开发

@@ -94,6 +94,24 @@ model SurveyCreationDraft {
   createdSurvey       Survey?  @relation(fields: [createdSurveyId], references: [id])
 }
 
+model FeedbackApp {
+  id        String          @id @default(cuid())
+  sourceApp String          @unique
+  token     String          @unique
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  entries   FeedbackEntry[]
+}
+
+model FeedbackEntry {
+  id            String      @id @default(cuid())
+  feedbackAppId String
+  sourceApp     String
+  message       String      @db.Text
+  createdAt     DateTime    @default(now())
+  feedbackApp   FeedbackApp @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
+}
+
 model Survey {
   id            String               @id @default(cuid())
   ownerId       String

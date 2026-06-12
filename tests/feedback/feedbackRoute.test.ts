@@ -39,6 +39,31 @@ describe("feedback route", () => {
     });
   });
 
+  it("accepts optional channel and device fields", async () => {
+    submitFeedback.mockResolvedValueOnce({ id: "feedback_2" });
+    const { POST } = await import("@/app/api/feedback/route");
+
+    const response = await POST(
+      makeRequest({
+        token: "valid-token",
+        sourceApp: "ChineseHandCopy",
+        channel: "web",
+        device: "iPhone 15 Pro",
+        message: "The writing panel is hard to use on mobile.",
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ ok: true, feedbackId: "feedback_2" });
+    expect(response.status).toBe(200);
+    expect(submitFeedback).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      channel: "web",
+      device: "iPhone 15 Pro",
+      message: "The writing panel is hard to use on mobile.",
+    });
+  });
+
   it("returns 401 when the token does not match the source app", async () => {
     submitFeedback.mockResolvedValueOnce(null);
     const { POST } = await import("@/app/api/feedback/route");

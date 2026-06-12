@@ -17,7 +17,7 @@ git reset --soft public_researvo/main
 
 ### 3. 重新打包并强推覆盖
 
-git commit -m "add feedback api"
+git commit -m "Update build script to include Prisma generation"
 git push public_researvo force-cover-public:main --force
 
 # 4. 清理现场回到日常开发

@@ -6,6 +6,8 @@ import { submitFeedback } from "@/lib/feedback/feedbackService";
 const FeedbackRequestZ = z.object({
   token: z.string().min(1),
   sourceApp: z.string().min(1).max(80),
+  channel: z.string().min(1).max(80).optional(),
+  device: z.string().min(1).max(120).optional(),
   message: z.string().min(1).max(5000),
 });
 

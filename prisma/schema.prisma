@@ -107,6 +107,8 @@ model FeedbackEntry {
   id            String      @id @default(cuid())
   feedbackAppId String
   sourceApp     String
+  channel       String?
+  device        String?
   message       String      @db.Text
   createdAt     DateTime    @default(now())
   feedbackApp   FeedbackApp @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)

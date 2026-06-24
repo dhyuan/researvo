@@ -39,7 +39,7 @@ describe("feedback route", () => {
     });
   });
 
-  it("accepts optional channel and device fields", async () => {
+  it("accepts optional channel, device, and version fields", async () => {
     submitFeedback.mockResolvedValueOnce({ id: "feedback_2" });
     const { POST } = await import("@/app/api/feedback/route");
 
@@ -49,6 +49,7 @@ describe("feedback route", () => {
         sourceApp: "ChineseHandCopy",
         channel: "web",
         device: "iPhone 15 Pro",
+        version: "1.4.2",
         message: "The writing panel is hard to use on mobile.",
       }),
     );
@@ -60,6 +61,7 @@ describe("feedback route", () => {
       sourceApp: "ChineseHandCopy",
       channel: "web",
       device: "iPhone 15 Pro",
+      version: "1.4.2",
       message: "The writing panel is hard to use on mobile.",
     });
   });

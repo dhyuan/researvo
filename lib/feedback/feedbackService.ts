@@ -5,6 +5,7 @@ export type SubmitFeedbackInput = {
   sourceApp: string;
   channel?: string;
   device?: string;
+  version?: string;
   message: string;
 };
 
@@ -23,6 +24,7 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
       sourceApp: app.sourceApp,
       channel: input.channel,
       device: input.device,
+      version: input.version,
       message: input.message,
     },
     select: {

@@ -8,6 +8,7 @@ const FeedbackRequestZ = z.object({
   sourceApp: z.string().min(1).max(80),
   channel: z.string().min(1).max(80).optional(),
   device: z.string().min(1).max(120).optional(),
+  version: z.string().min(1).max(80).optional(),
   message: z.string().min(1).max(5000),
 });
 

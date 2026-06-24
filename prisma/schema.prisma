@@ -109,6 +109,7 @@ model FeedbackEntry {
   sourceApp     String
   channel       String?
   device        String?
+  version       String?
   message       String      @db.Text
   createdAt     DateTime    @default(now())
   feedbackApp   FeedbackApp @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)

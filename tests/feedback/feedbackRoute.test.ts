@@ -1,8 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const getFeedbackDetail = vi.fn();
+const listFeedbackForInstall = vi.fn();
+const markFeedbackRepliesRead = vi.fn();
+const replyToFeedbackAsAdmin = vi.fn();
 const submitFeedback = vi.fn();
 
 vi.mock("@/lib/feedback/feedbackService", () => ({
+  getFeedbackDetail,
+  listFeedbackForInstall,
+  markFeedbackRepliesRead,
+  replyToFeedbackAsAdmin,
   submitFeedback,
 }));
 
@@ -15,6 +23,10 @@ const makeRequest = (body: unknown) =>
 
 describe("feedback route", () => {
   beforeEach(() => {
+    getFeedbackDetail.mockReset();
+    listFeedbackForInstall.mockReset();
+    markFeedbackRepliesRead.mockReset();
+    replyToFeedbackAsAdmin.mockReset();
     submitFeedback.mockReset();
   });
 
@@ -30,7 +42,11 @@ describe("feedback route", () => {
       }),
     );
 
-    await expect(response.json()).resolves.toEqual({ ok: true, feedbackId: "feedback_1" });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      id: "feedback_1",
+      feedbackId: "feedback_1",
+    });
     expect(response.status).toBe(200);
     expect(submitFeedback).toHaveBeenCalledWith({
       token: "valid-token",
@@ -54,7 +70,11 @@ describe("feedback route", () => {
       }),
     );
 
-    await expect(response.json()).resolves.toEqual({ ok: true, feedbackId: "feedback_2" });
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      id: "feedback_2",
+      feedbackId: "feedback_2",
+    });
     expect(response.status).toBe(200);
     expect(submitFeedback).toHaveBeenCalledWith({
       token: "valid-token",
@@ -63,6 +83,33 @@ describe("feedback route", () => {
       device: "iPhone 15 Pro",
       version: "1.4.2",
       message: "The writing panel is hard to use on mobile.",
+    });
+  });
+
+  it("accepts parentId when replying to existing feedback", async () => {
+    submitFeedback.mockResolvedValueOnce({ id: "feedback_reply_1" });
+    const { POST } = await import("@/app/api/feedback/route");
+
+    const response = await POST(
+      makeRequest({
+        token: "valid-token",
+        sourceApp: "ChineseHandCopy",
+        parentId: "feedback_parent_1",
+        message: "Adding more detail about the mobile writing panel issue.",
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      id: "feedback_reply_1",
+      feedbackId: "feedback_reply_1",
+    });
+    expect(response.status).toBe(200);
+    expect(submitFeedback).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      parentId: "feedback_parent_1",
+      message: "Adding more detail about the mobile writing panel issue.",
     });
   });
 
@@ -95,5 +142,207 @@ describe("feedback route", () => {
     await expect(response.json()).resolves.toEqual({ error: "INVALID_FEEDBACK_REQUEST" });
     expect(response.status).toBe(400);
     expect(submitFeedback).not.toHaveBeenCalled();
+  });
+
+  it("stores client install metadata when creating feedback", async () => {
+    submitFeedback.mockResolvedValueOnce({ id: "fb_123" });
+    const { POST } = await import("@/app/api/feedback/route");
+
+    const response = await POST(
+      makeRequest({
+        token: "valid-token",
+        sourceApp: "ChineseHandCopy",
+        channel: "google_play",
+        device: "iPhone 15 Pro",
+        installId: "install_19a",
+        appVersion: "硬笔临帖 v2.1.4",
+        message: " 希望能支持横版纸张 ",
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      ok: true,
+      id: "fb_123",
+      feedbackId: "fb_123",
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(submitFeedback).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      channel: "google_play",
+      device: "iPhone 15 Pro",
+      installId: "install_19a",
+      appVersion: "硬笔临帖 v2.1.4",
+      message: "希望能支持横版纸张",
+    });
+  });
+
+  it("lists feedback for the current install", async () => {
+    listFeedbackForInstall.mockResolvedValueOnce([
+      {
+        id: "fb_123",
+        message: "希望能支持横版纸张",
+        status: "replied",
+        createdAt: "2026-06-24T10:00:00.000Z",
+        updatedAt: "2026-06-24T11:00:00.000Z",
+        lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+        unreadAdminReplyCount: 1,
+      },
+    ]);
+    const { GET } = await import("@/app/api/feedback/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        {
+          id: "fb_123",
+          message: "希望能支持横版纸张",
+          status: "replied",
+          createdAt: "2026-06-24T10:00:00.000Z",
+          updatedAt: "2026-06-24T11:00:00.000Z",
+          lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+          unreadAdminReplyCount: 1,
+        },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(listFeedbackForInstall).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+    });
+  });
+
+  it("returns 400 when list query fields are missing", async () => {
+    const { GET } = await import("@/app/api/feedback/route");
+
+    const response = await GET(
+      new Request("http://localhost/api/feedback?token=valid-token&sourceApp=ChineseHandCopy"),
+    );
+
+    await expect(response.json()).resolves.toEqual({ error: "INVALID_FEEDBACK_REQUEST" });
+    expect(response.status).toBe(400);
+    expect(listFeedbackForInstall).not.toHaveBeenCalled();
+  });
+
+  it("returns feedback detail for the current install", async () => {
+    getFeedbackDetail.mockResolvedValueOnce({
+      id: "fb_123",
+      message: "希望能支持横版纸张",
+      status: "replied",
+      createdAt: "2026-06-24T10:00:00.000Z",
+      updatedAt: "2026-06-24T11:00:00.000Z",
+      lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+      unreadAdminReplyCount: 1,
+      messages: [
+        {
+          id: "msg_1",
+          feedbackId: "fb_123",
+          senderType: "user",
+          body: "希望能支持横版纸张",
+          createdAt: "2026-06-24T10:00:00.000Z",
+        },
+      ],
+    });
+    const { GET } = await import("@/app/api/feedback/[feedbackId]/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback/fb_123?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+      { params: Promise.resolve({ feedbackId: "fb_123" }) },
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      id: "fb_123",
+      message: "希望能支持横版纸张",
+      status: "replied",
+      createdAt: "2026-06-24T10:00:00.000Z",
+      updatedAt: "2026-06-24T11:00:00.000Z",
+      lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+      unreadAdminReplyCount: 1,
+      messages: [
+        {
+          id: "msg_1",
+          feedbackId: "fb_123",
+          senderType: "user",
+          body: "希望能支持横版纸张",
+          createdAt: "2026-06-24T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(getFeedbackDetail).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+      feedbackId: "fb_123",
+    });
+  });
+
+  it("returns 404 when feedback detail does not belong to the current install", async () => {
+    getFeedbackDetail.mockResolvedValueOnce(null);
+    const { GET } = await import("@/app/api/feedback/[feedbackId]/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback/fb_other?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+      { params: Promise.resolve({ feedbackId: "fb_other" }) },
+    );
+
+    await expect(response.json()).resolves.toEqual({ error: "FEEDBACK_NOT_FOUND" });
+    expect(response.status).toBe(404);
+  });
+
+  it("marks feedback replies as read for the current install", async () => {
+    markFeedbackRepliesRead.mockResolvedValueOnce(true);
+    const { PATCH } = await import("@/app/api/feedback/[feedbackId]/read/route");
+
+    const response = await PATCH(
+      new Request(
+        "http://localhost/api/feedback/fb_123/read?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+      { params: Promise.resolve({ feedbackId: "fb_123" }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(markFeedbackRepliesRead).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+      feedbackId: "fb_123",
+    });
+  });
+
+  it("creates an admin reply for feedback", async () => {
+    replyToFeedbackAsAdmin.mockResolvedValueOnce({ id: "msg_admin_1" });
+    const { POST } = await import("@/app/api/admin/feedback/[feedbackId]/replies/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/admin/feedback/fb_123/replies", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ body: " 已记录，会放入后续版本评估。 " }),
+      }),
+      { params: Promise.resolve({ feedbackId: "fb_123" }) },
+    );
+
+    await expect(response.json()).resolves.toEqual({ id: "msg_admin_1" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(replyToFeedbackAsAdmin).toHaveBeenCalledWith({
+      feedbackId: "fb_123",
+      body: "已记录，会放入后续版本评估。",
+    });
   });
 });

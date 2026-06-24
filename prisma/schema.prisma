@@ -95,24 +95,60 @@ model SurveyCreationDraft {
 }
 
 model FeedbackApp {
-  id        String          @id @default(cuid())
-  sourceApp String          @unique
-  token     String          @unique
-  createdAt DateTime        @default(now())
-  updatedAt DateTime        @updatedAt
-  entries   FeedbackEntry[]
+  id        String           @id @default(cuid())
+  sourceApp String           @unique
+  token     String           @unique
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  legacyEntries LegacyFeedbackEntry[]
+  threads   FeedbackThread[]
 }
 
-model FeedbackEntry {
-  id            String      @id @default(cuid())
+model LegacyFeedbackEntry {
+  id            String      @id
   feedbackAppId String
   sourceApp     String
+  message       String
+  createdAt     DateTime    @default(now())
   channel       String?
   device        String?
   version       String?
-  message       String      @db.Text
-  createdAt     DateTime    @default(now())
   feedbackApp   FeedbackApp @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
+
+  @@map("FeedbackEntry")
+}
+
+model FeedbackThread {
+  id               String            @id @default(cuid())
+  feedbackAppId    String
+  sourceApp        String
+  channel          String
+  installId        String
+  device           String?
+  appVersion       String?
+  message          String            @db.Text
+  status           String            @default("open")
+  userLastReadAt   DateTime?
+  lastAdminReplyAt DateTime?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  feedbackApp      FeedbackApp       @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
+  messages         FeedbackMessage[]
+
+  @@index([sourceApp, installId, updatedAt])
+  @@map("feedback_threads")
+}
+
+model FeedbackMessage {
+  id         String         @id @default(cuid())
+  feedbackId String
+  senderType String
+  body       String         @db.Text
+  createdAt  DateTime       @default(now())
+  feedback   FeedbackThread @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+
+  @@index([feedbackId, createdAt])
+  @@map("feedback_messages")
 }
 
 model Survey {

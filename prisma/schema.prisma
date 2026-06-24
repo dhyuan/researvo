@@ -135,6 +135,7 @@ model FeedbackThread {
   feedbackApp      FeedbackApp       @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
   messages         FeedbackMessage[]
 
+  @@unique([sourceApp, installId])
   @@index([sourceApp, installId, updatedAt])
   @@map("feedback_threads")
 }

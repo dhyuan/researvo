@@ -7,6 +7,7 @@ const mockFeedbackThreadFindMany = vi.fn();
 const mockFeedbackThreadFindUnique = vi.fn();
 const mockFeedbackThreadUpdate = vi.fn();
 const mockFeedbackThreadUpdateMany = vi.fn();
+const mockFeedbackThreadUpsert = vi.fn();
 const mockFeedbackMessageCreate = vi.fn();
 const mockTransaction = vi.fn();
 
@@ -23,6 +24,7 @@ vi.mock("@/lib/persistence/repositories", () => ({
       findUnique: mockFeedbackThreadFindUnique,
       update: mockFeedbackThreadUpdate,
       updateMany: mockFeedbackThreadUpdateMany,
+      upsert: mockFeedbackThreadUpsert,
     },
     feedbackMessage: {
       create: mockFeedbackMessageCreate,
@@ -44,11 +46,11 @@ describe("feedbackService", () => {
 
   it("creates a feedback thread and initial user message", async () => {
     mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadCreate.mockResolvedValue({ id: "fb_123" });
+    mockFeedbackThreadUpsert.mockResolvedValue({ id: "fb_123" });
     mockTransaction.mockImplementation(async (callback) =>
       callback({
         feedbackThread: {
-          create: mockFeedbackThreadCreate,
+          upsert: mockFeedbackThreadUpsert,
         },
         feedbackMessage: {
           create: mockFeedbackMessageCreate,
@@ -69,8 +71,14 @@ describe("feedbackService", () => {
       }),
     ).resolves.toEqual({ id: "fb_123" });
 
-    expect(mockFeedbackThreadCreate).toHaveBeenCalledWith({
-      data: {
+    expect(mockFeedbackThreadUpsert).toHaveBeenCalledWith({
+      where: {
+        sourceApp_installId: {
+          sourceApp: "ChineseHandCopy",
+          installId: "install_19a",
+        },
+      },
+      create: {
         feedbackAppId: "app_1",
         sourceApp: "ChineseHandCopy",
         channel: "google_play",
@@ -78,6 +86,14 @@ describe("feedbackService", () => {
         device: "iPhone 15 Pro",
         appVersion: "硬笔临帖 v2.1.4",
         message: "希望能支持横版纸张",
+        status: "open",
+      },
+      update: {
+        channel: "google_play",
+        device: "iPhone 15 Pro",
+        appVersion: "硬笔临帖 v2.1.4",
+        status: "open",
+        updatedAt: expect.any(Date),
       },
       select: { id: true },
     });
@@ -87,6 +103,45 @@ describe("feedbackService", () => {
         senderType: "user",
         body: "希望能支持横版纸张",
       },
+    });
+  });
+
+  it("creates or reuses one thread when sending user messages", async () => {
+    mockFeedbackAppFindUnique.mockResolvedValue(app);
+    mockFeedbackThreadCreate.mockResolvedValue({ id: "fb_123" });
+    mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
+    mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_123" });
+    mockTransaction.mockImplementation(async (callback) =>
+      callback({
+        feedbackThread: {
+          upsert: vi.fn().mockResolvedValue({ id: "fb_123" }),
+        },
+        feedbackMessage: {
+          create: mockFeedbackMessageCreate,
+        },
+      }),
+    );
+    const { sendUserFeedbackMessage } = await import("@/lib/feedback/feedbackService");
+
+    await expect(
+      sendUserFeedbackMessage({
+        token: "valid-token",
+        sourceApp: "ChineseHandCopy",
+        channel: "google_play",
+        device: "iPhone 15 Pro",
+        installId: "install_19a",
+        appVersion: "硬笔临帖 v2.1.4",
+        message: "补充一下，主要是想横向打印。",
+      }),
+    ).resolves.toEqual({ id: "msg_123" });
+
+    expect(mockFeedbackMessageCreate).toHaveBeenCalledWith({
+      data: {
+        feedbackId: "fb_123",
+        senderType: "user",
+        body: "补充一下，主要是想横向打印。",
+      },
+      select: { id: true },
     });
   });
 
@@ -176,6 +231,30 @@ describe("feedbackService", () => {
     expect(mockFeedbackThreadUpdateMany).toHaveBeenCalledWith({
       where: {
         id: "fb_123",
+        sourceApp: "ChineseHandCopy",
+        installId: "install_19a",
+      },
+      data: {
+        userLastReadAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("marks the current install thread as read", async () => {
+    mockFeedbackAppFindUnique.mockResolvedValue(app);
+    mockFeedbackThreadUpdateMany.mockResolvedValue({ count: 1 });
+    const { markCurrentFeedbackThreadRead } = await import("@/lib/feedback/feedbackService");
+
+    await expect(
+      markCurrentFeedbackThreadRead({
+        token: "valid-token",
+        sourceApp: "ChineseHandCopy",
+        installId: "install_19a",
+      }),
+    ).resolves.toBe(true);
+
+    expect(mockFeedbackThreadUpdateMany).toHaveBeenCalledWith({
+      where: {
         sourceApp: "ChineseHandCopy",
         installId: "install_19a",
       },

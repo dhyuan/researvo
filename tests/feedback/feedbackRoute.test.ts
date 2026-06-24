@@ -1,17 +1,27 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getFeedbackDetail = vi.fn();
+const getCurrentFeedbackThread = vi.fn();
 const listFeedbackForInstall = vi.fn();
+const listFeedbackThreadsForAdmin = vi.fn();
 const markFeedbackRepliesRead = vi.fn();
+const markCurrentFeedbackThreadRead = vi.fn();
 const replyToFeedbackAsAdmin = vi.fn();
+const sendUserFeedbackMessage = vi.fn();
+const updateFeedbackStatusAsAdmin = vi.fn();
 const submitFeedback = vi.fn();
 
 vi.mock("@/lib/feedback/feedbackService", () => ({
   getFeedbackDetail,
+  getCurrentFeedbackThread,
   listFeedbackForInstall,
+  listFeedbackThreadsForAdmin,
   markFeedbackRepliesRead,
+  markCurrentFeedbackThreadRead,
   replyToFeedbackAsAdmin,
+  sendUserFeedbackMessage,
   submitFeedback,
+  updateFeedbackStatusAsAdmin,
 }));
 
 const makeRequest = (body: unknown) =>
@@ -24,9 +34,14 @@ const makeRequest = (body: unknown) =>
 describe("feedback route", () => {
   beforeEach(() => {
     getFeedbackDetail.mockReset();
+    getCurrentFeedbackThread.mockReset();
     listFeedbackForInstall.mockReset();
+    listFeedbackThreadsForAdmin.mockReset();
     markFeedbackRepliesRead.mockReset();
+    markCurrentFeedbackThreadRead.mockReset();
     replyToFeedbackAsAdmin.mockReset();
+    sendUserFeedbackMessage.mockReset();
+    updateFeedbackStatusAsAdmin.mockReset();
     submitFeedback.mockReset();
   });
 
@@ -343,6 +358,202 @@ describe("feedback route", () => {
     expect(replyToFeedbackAsAdmin).toHaveBeenCalledWith({
       feedbackId: "fb_123",
       body: "已记录，会放入后续版本评估。",
+    });
+  });
+
+  it("returns the current feedback conversation for an install", async () => {
+    getCurrentFeedbackThread.mockResolvedValueOnce({
+      id: "fb_123",
+      message: "希望能支持横版纸张",
+      status: "replied",
+      createdAt: "2026-06-24T10:00:00.000Z",
+      updatedAt: "2026-06-24T11:00:00.000Z",
+      lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+      unreadAdminReplyCount: 1,
+      messages: [
+        {
+          id: "msg_1",
+          feedbackId: "fb_123",
+          senderType: "user",
+          body: "希望能支持横版纸张",
+          createdAt: "2026-06-24T10:00:00.000Z",
+        },
+      ],
+    });
+    const { GET } = await import("@/app/api/feedback/thread/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback/thread?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      id: "fb_123",
+      message: "希望能支持横版纸张",
+      status: "replied",
+      createdAt: "2026-06-24T10:00:00.000Z",
+      updatedAt: "2026-06-24T11:00:00.000Z",
+      lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
+      unreadAdminReplyCount: 1,
+      messages: [
+        {
+          id: "msg_1",
+          feedbackId: "fb_123",
+          senderType: "user",
+          body: "希望能支持横版纸张",
+          createdAt: "2026-06-24T10:00:00.000Z",
+        },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(getCurrentFeedbackThread).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+    });
+  });
+
+  it("returns 404 when the current install has no feedback conversation", async () => {
+    getCurrentFeedbackThread.mockResolvedValueOnce(null);
+    const { GET } = await import("@/app/api/feedback/thread/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback/thread?token=valid-token&sourceApp=ChineseHandCopy&installId=install_missing",
+      ),
+    );
+
+    await expect(response.json()).resolves.toEqual({ error: "FEEDBACK_NOT_FOUND" });
+    expect(response.status).toBe(404);
+  });
+
+  it("sends a user message to the current feedback conversation", async () => {
+    sendUserFeedbackMessage.mockResolvedValueOnce({ id: "msg_123" });
+    const { POST } = await import("@/app/api/feedback/thread/messages/route");
+
+    const response = await POST(
+      new Request("http://localhost/api/feedback/thread/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({
+          token: "valid-token",
+          sourceApp: "ChineseHandCopy",
+          channel: "google_play",
+          device: "iPhone 15 Pro",
+          installId: "install_19a",
+          appVersion: "硬笔临帖 v2.1.4",
+          message: " 希望能支持横版纸张 ",
+        }),
+      }),
+    );
+
+    await expect(response.json()).resolves.toEqual({ id: "msg_123" });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/json; charset=utf-8");
+    expect(sendUserFeedbackMessage).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      channel: "google_play",
+      device: "iPhone 15 Pro",
+      installId: "install_19a",
+      appVersion: "硬笔临帖 v2.1.4",
+      message: "希望能支持横版纸张",
+    });
+  });
+
+  it("marks the current feedback conversation as read", async () => {
+    markCurrentFeedbackThreadRead.mockResolvedValueOnce(true);
+    const { PATCH } = await import("@/app/api/feedback/thread/read/route");
+
+    const response = await PATCH(
+      new Request(
+        "http://localhost/api/feedback/thread/read?token=valid-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(markCurrentFeedbackThreadRead).toHaveBeenCalledWith({
+      token: "valid-token",
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+    });
+  });
+
+  it("lists feedback threads for admin", async () => {
+    listFeedbackThreadsForAdmin.mockResolvedValueOnce({
+      items: [
+        {
+          id: "fb_123",
+          sourceApp: "ChineseHandCopy",
+          installId: "install_19a",
+          channel: "google_play",
+          device: "iPhone 15 Pro",
+          appVersion: "硬笔临帖 v2.1.4",
+          message: "希望能支持横版纸张",
+          status: "open",
+          createdAt: "2026-06-24T10:00:00.000Z",
+          updatedAt: "2026-06-24T11:00:00.000Z",
+          lastAdminReplyAt: null,
+          unreadAdminReplyCount: 0,
+        },
+      ],
+    });
+    const { GET } = await import("@/app/api/admin/feedback/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/admin/feedback?sourceApp=ChineseHandCopy&status=open&channel=google_play&page=1&pageSize=50",
+      ),
+    );
+
+    await expect(response.json()).resolves.toEqual({
+      items: [
+        {
+          id: "fb_123",
+          sourceApp: "ChineseHandCopy",
+          installId: "install_19a",
+          channel: "google_play",
+          device: "iPhone 15 Pro",
+          appVersion: "硬笔临帖 v2.1.4",
+          message: "希望能支持横版纸张",
+          status: "open",
+          createdAt: "2026-06-24T10:00:00.000Z",
+          updatedAt: "2026-06-24T11:00:00.000Z",
+          lastAdminReplyAt: null,
+          unreadAdminReplyCount: 0,
+        },
+      ],
+    });
+    expect(response.status).toBe(200);
+    expect(listFeedbackThreadsForAdmin).toHaveBeenCalledWith({
+      sourceApp: "ChineseHandCopy",
+      status: "open",
+      channel: "google_play",
+      page: 1,
+      pageSize: 50,
+    });
+  });
+
+  it("updates feedback status for admin", async () => {
+    updateFeedbackStatusAsAdmin.mockResolvedValueOnce({ id: "fb_123" });
+    const { PATCH } = await import("@/app/api/admin/feedback/[feedbackId]/route");
+
+    const response = await PATCH(
+      new Request("http://localhost/api/admin/feedback/fb_123", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ status: "resolved" }),
+      }),
+      { params: Promise.resolve({ feedbackId: "fb_123" }) },
+    );
+
+    await expect(response.json()).resolves.toEqual({ id: "fb_123" });
+    expect(response.status).toBe(200);
+    expect(updateFeedbackStatusAsAdmin).toHaveBeenCalledWith({
+      feedbackId: "fb_123",
+      status: "resolved",
     });
   });
 });

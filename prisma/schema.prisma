@@ -145,6 +145,8 @@ model FeedbackMessage {
   feedbackId String
   senderType String
   body       String         @db.Text
+  appVersion String?
+  ipAddress  String?
   createdAt  DateTime       @default(now())
   feedback   FeedbackThread @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
 

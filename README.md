@@ -27,6 +27,12 @@ Create `.env` from `.env.example`:
 cp .env.example .env
 ```
 
+FEEDBACK_ADMIN_TOKEN 用于进入 /admin/feedback 后台管理
+
+```bash
+printf 'FEEDBACK_ADMIN_TOKEN=%s\n' "$(openssl rand -base64 48)" >> .env
+```
+
 Set `DATABASE_URL` to a PostgreSQL database:
 
 ```bash

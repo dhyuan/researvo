@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { listFeedbackForInstall, submitFeedback } from "@/lib/feedback/feedbackService";
+import { getClientIp } from "@/lib/http/clientIp";
 
 const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
@@ -49,7 +50,11 @@ export async function POST(request: Request) {
     return json({ error: "INVALID_FEEDBACK_REQUEST" }, { status: 400 });
   }
 
-  const feedback = await submitFeedback(parsed.data);
+  const ipAddress = getClientIp(request.headers);
+  const feedback = await submitFeedback({
+    ...parsed.data,
+    ...(ipAddress ? { ipAddress } : {}),
+  });
 
   if (!feedback) {
     return json({ error: "INVALID_FEEDBACK_TOKEN" }, { status: 401 });

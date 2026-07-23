@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { updateFeedbackStatusAsAdmin } from "@/lib/feedback/feedbackService";
+import { isFeedbackAdminAuthorized } from "@/lib/feedback/adminAuth";
+import {
+  getFeedbackThreadForAdmin,
+  updateFeedbackStatusAsAdmin,
+} from "@/lib/feedback/feedbackService";
 
 const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
@@ -21,33 +25,30 @@ const json = (body: unknown, init?: ResponseInit) =>
   });
 
 async function authorizeAdmin(request: Request) {
-  const configuredToken = process.env.FEEDBACK_ADMIN_TOKEN ?? process.env.ADMIN_AUTH;
-
-  if (configuredToken) {
-    const authorization = request.headers.get("authorization");
-    if (authorization !== `Bearer ${configuredToken}`) {
-      return json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
+  if (isFeedbackAdminAuthorized(request)) {
     return null;
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    return null;
+  return json({ error: "UNAUTHORIZED" }, { status: 401 });
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ feedbackId: string }> },
+) {
+  const authResponse = await authorizeAdmin(request);
+  if (authResponse) {
+    return authResponse;
   }
 
-  const { requirePublisher } = await import("@/lib/auth/currentUser");
-  const { authErrorResponse } = await import("@/lib/auth/http");
+  const { feedbackId } = await context.params;
+  const feedback = await getFeedbackThreadForAdmin(feedbackId);
 
-  try {
-    await requirePublisher();
-    return null;
-  } catch (error) {
-    const response = authErrorResponse(error);
-    if (response) {
-      return response;
-    }
-    throw error;
+  if (!feedback) {
+    return json({ error: "FEEDBACK_NOT_FOUND" }, { status: 404 });
   }
+
+  return json(feedback);
 }
 
 export async function PATCH(

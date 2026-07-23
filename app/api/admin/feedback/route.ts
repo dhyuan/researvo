@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { isFeedbackAdminAuthorized } from "@/lib/feedback/adminAuth";
 import { listFeedbackThreadsForAdmin } from "@/lib/feedback/feedbackService";
 
 const jsonHeaders = {
@@ -11,6 +12,7 @@ const AdminFeedbackListQueryZ = z.object({
   sourceApp: z.string().min(1).max(80).optional(),
   status: z.enum(["open", "replied", "resolved", "ignored"]).optional(),
   channel: z.string().min(1).max(80).optional(),
+  q: z.string().trim().min(1).max(200).optional(),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(50),
 });
@@ -25,33 +27,11 @@ const json = (body: unknown, init?: ResponseInit) =>
   });
 
 async function authorizeAdmin(request: Request) {
-  const configuredToken = process.env.FEEDBACK_ADMIN_TOKEN ?? process.env.ADMIN_AUTH;
-
-  if (configuredToken) {
-    const authorization = request.headers.get("authorization");
-    if (authorization !== `Bearer ${configuredToken}`) {
-      return json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
+  if (isFeedbackAdminAuthorized(request)) {
     return null;
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    return null;
-  }
-
-  const { requirePublisher } = await import("@/lib/auth/currentUser");
-  const { authErrorResponse } = await import("@/lib/auth/http");
-
-  try {
-    await requirePublisher();
-    return null;
-  } catch (error) {
-    const response = authErrorResponse(error);
-    if (response) {
-      return response;
-    }
-    throw error;
-  }
+  return json({ error: "UNAUTHORIZED" }, { status: 401 });
 }
 
 export async function GET(request: Request) {

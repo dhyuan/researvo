@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { isFeedbackAdminAuthorized } from "@/lib/feedback/adminAuth";
 import { replyToFeedbackAsAdmin } from "@/lib/feedback/feedbackService";
 
 const jsonHeaders = {
@@ -21,33 +22,11 @@ const json = (body: unknown, init?: ResponseInit) =>
   });
 
 async function authorizeAdmin(request: Request) {
-  const configuredToken = process.env.FEEDBACK_ADMIN_TOKEN ?? process.env.ADMIN_AUTH;
-
-  if (configuredToken) {
-    const authorization = request.headers.get("authorization");
-    if (authorization !== `Bearer ${configuredToken}`) {
-      return json({ error: "UNAUTHORIZED" }, { status: 401 });
-    }
+  if (isFeedbackAdminAuthorized(request)) {
     return null;
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    return null;
-  }
-
-  const { requirePublisher } = await import("@/lib/auth/currentUser");
-  const { authErrorResponse } = await import("@/lib/auth/http");
-
-  try {
-    await requirePublisher();
-    return null;
-  } catch (error) {
-    const response = authErrorResponse(error);
-    if (response) {
-      return response;
-    }
-    throw error;
-  }
+  return json({ error: "UNAUTHORIZED" }, { status: 401 });
 }
 
 export async function POST(

@@ -8,6 +8,7 @@ export type SubmitFeedbackInput = {
   version?: string;
   installId?: string;
   appVersion?: string;
+  ipAddress?: string;
   parentId?: string;
   message: string;
 };
@@ -29,6 +30,7 @@ export type SendUserFeedbackMessageInput = {
   device?: string;
   installId: string;
   appVersion?: string;
+  ipAddress?: string;
   message: string;
 };
 
@@ -36,6 +38,7 @@ export type AdminFeedbackListInput = {
   sourceApp?: string;
   status?: string;
   channel?: string;
+  q?: string;
   page: number;
   pageSize: number;
 };
@@ -146,6 +149,8 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
         feedbackId: thread.id,
         senderType: "user",
         body: input.message,
+        appVersion: input.appVersion ?? input.version,
+        ipAddress: input.ipAddress,
       },
     });
 
@@ -196,6 +201,8 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
         feedbackId: thread.id,
         senderType: "user",
         body: input.message,
+        appVersion: input.appVersion,
+        ipAddress: input.ipAddress,
       },
       select: {
         id: true,
@@ -397,37 +404,120 @@ export async function replyToFeedbackAsAdmin(input: AdminFeedbackReplyInput) {
 }
 
 export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput) {
-  const threads = await prisma.feedbackThread.findMany({
-    where: {
-      sourceApp: input.sourceApp,
-      status: input.status,
-      channel: input.channel,
-    },
+  const where = {
+    sourceApp: input.sourceApp,
+    status: input.status,
+    channel: input.channel,
+    OR: input.q
+      ? [
+          { message: { contains: input.q, mode: "insensitive" as const } },
+          { sourceApp: { contains: input.q, mode: "insensitive" as const } },
+          { installId: { contains: input.q, mode: "insensitive" as const } },
+          {
+            messages: {
+              some: { body: { contains: input.q, mode: "insensitive" as const } },
+            },
+          },
+        ]
+      : undefined,
+  };
+
+  const [threads, total] = await Promise.all([
+    prisma.feedbackThread.findMany({
+      where,
+      include: {
+        messages: {
+          orderBy: { createdAt: "desc" as const },
+          take: 1,
+          select: {
+            id: true,
+            feedbackId: true,
+            senderType: true,
+            body: true,
+            createdAt: true,
+          },
+        },
+        _count: {
+          select: { messages: true },
+        },
+      },
+      orderBy: { updatedAt: "desc" },
+      skip: (input.page - 1) * input.pageSize,
+      take: input.pageSize,
+    }),
+    prisma.feedbackThread.count({ where }),
+  ]);
+
+  return {
+    items: threads.map((thread) => {
+      const latestMessage = thread.messages[0] ?? null;
+      return {
+        id: thread.id,
+        message: latestMessage?.body ?? thread.message,
+        status: thread.status,
+        createdAt: thread.createdAt.toISOString(),
+        updatedAt: thread.updatedAt.toISOString(),
+        lastAdminReplyAt: thread.lastAdminReplyAt?.toISOString() ?? null,
+        sourceApp: thread.sourceApp,
+        installId: thread.installId,
+        channel: thread.channel,
+        device: thread.device,
+        appVersion: thread.appVersion,
+        messageCount: thread._count.messages,
+        latestMessage: latestMessage
+          ? {
+              body: latestMessage.body,
+              senderType: latestMessage.senderType,
+              createdAt: latestMessage.createdAt.toISOString(),
+            }
+          : null,
+        needsAdminReply: latestMessage?.senderType === "user",
+      };
+    }),
+    page: input.page,
+    pageSize: input.pageSize,
+    total,
+    hasMore: input.page * input.pageSize < total,
+  };
+}
+
+export async function getFeedbackThreadForAdmin(feedbackId: string) {
+  const thread = await prisma.feedbackThread.findUnique({
+    where: { id: feedbackId },
     include: {
       messages: {
-        where: { senderType: "admin" },
+        orderBy: { createdAt: "asc" },
         select: {
           id: true,
           feedbackId: true,
           senderType: true,
           body: true,
+          appVersion: true,
           createdAt: true,
         },
       },
     },
-    orderBy: { updatedAt: "desc" },
-    skip: (input.page - 1) * input.pageSize,
-    take: input.pageSize,
   });
 
+  if (!thread) {
+    return null;
+  }
+
   return {
-    items: threads.map((thread) => ({
-      ...serializeThreadSummary(thread),
-      sourceApp: thread.sourceApp,
-      installId: thread.installId,
-      channel: thread.channel,
-      device: thread.device,
-      appVersion: thread.appVersion,
+    id: thread.id,
+    sourceApp: thread.sourceApp,
+    installId: thread.installId,
+    channel: thread.channel,
+    device: thread.device,
+    appVersion: thread.appVersion,
+    message: thread.message,
+    status: thread.status,
+    createdAt: thread.createdAt.toISOString(),
+    updatedAt: thread.updatedAt.toISOString(),
+    lastAdminReplyAt: thread.lastAdminReplyAt?.toISOString() ?? null,
+    messages: thread.messages.map((message) => ({
+      ...message,
+      createdAt: message.createdAt.toISOString(),
     })),
   };
 }

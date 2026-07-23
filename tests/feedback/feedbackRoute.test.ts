@@ -24,10 +24,10 @@ vi.mock("@/lib/feedback/feedbackService", () => ({
   updateFeedbackStatusAsAdmin,
 }));
 
-const makeRequest = (body: unknown) =>
+const makeRequest = (body: unknown, headers?: HeadersInit) =>
   new Request("http://localhost/api/feedback", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify(body),
   });
 
@@ -75,14 +75,19 @@ describe("feedback route", () => {
     const { POST } = await import("@/app/api/feedback/route");
 
     const response = await POST(
-      makeRequest({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        channel: "web",
-        device: "iPhone 15 Pro",
-        version: "1.4.2",
-        message: "The writing panel is hard to use on mobile.",
-      }),
+      makeRequest(
+        {
+          token: "valid-token",
+          sourceApp: "ChineseHandCopy",
+          channel: "web",
+          device: "iPhone 15 Pro",
+          version: "1.4.2",
+          message: "The writing panel is hard to use on mobile.",
+        },
+        {
+          "x-forwarded-for": "203.0.113.42, 10.0.0.1",
+        },
+      ),
     );
 
     await expect(response.json()).resolves.toEqual({
@@ -97,6 +102,7 @@ describe("feedback route", () => {
       channel: "web",
       device: "iPhone 15 Pro",
       version: "1.4.2",
+      ipAddress: "203.0.113.42",
       message: "The writing panel is hard to use on mobile.",
     });
   });
@@ -435,7 +441,10 @@ describe("feedback route", () => {
     const response = await POST(
       new Request("http://localhost/api/feedback/thread/messages", {
         method: "POST",
-        headers: { "Content-Type": "application/json; charset=utf-8" },
+        headers: {
+          "Content-Type": "application/json; charset=utf-8",
+          "x-real-ip": "2001:db8::42",
+        },
         body: JSON.stringify({
           token: "valid-token",
           sourceApp: "ChineseHandCopy",
@@ -458,6 +467,7 @@ describe("feedback route", () => {
       device: "iPhone 15 Pro",
       installId: "install_19a",
       appVersion: "硬笔临帖 v2.1.4",
+      ipAddress: "2001:db8::42",
       message: "希望能支持横版纸张",
     });
   });

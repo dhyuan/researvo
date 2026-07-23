@@ -67,6 +67,7 @@ describe("feedbackService", () => {
         device: "iPhone 15 Pro",
         installId: "install_19a",
         appVersion: "硬笔临帖 v2.1.4",
+        ipAddress: "203.0.113.42",
         message: "希望能支持横版纸张",
       }),
     ).resolves.toEqual({ id: "fb_123" });
@@ -102,6 +103,8 @@ describe("feedbackService", () => {
         feedbackId: "fb_123",
         senderType: "user",
         body: "希望能支持横版纸张",
+        appVersion: "硬笔临帖 v2.1.4",
+        ipAddress: "203.0.113.42",
       },
     });
   });
@@ -131,6 +134,7 @@ describe("feedbackService", () => {
         device: "iPhone 15 Pro",
         installId: "install_19a",
         appVersion: "硬笔临帖 v2.1.4",
+        ipAddress: "2001:db8::42",
         message: "补充一下，主要是想横向打印。",
       }),
     ).resolves.toEqual({ id: "msg_123" });
@@ -140,6 +144,8 @@ describe("feedbackService", () => {
         feedbackId: "fb_123",
         senderType: "user",
         body: "补充一下，主要是想横向打印。",
+        appVersion: "硬笔临帖 v2.1.4",
+        ipAddress: "2001:db8::42",
       },
       select: { id: true },
     });

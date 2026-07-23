@@ -137,6 +137,8 @@ model FeedbackThread {
   pushEvents       FeedbackPushEvent[]
 
   @@unique([sourceApp, installId])
+  @@index([updatedAt])
+  @@index([status, updatedAt])
   @@index([sourceApp, installId, updatedAt])
   @@map("feedback_threads")
 }

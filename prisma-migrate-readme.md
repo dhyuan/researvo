@@ -23,7 +23,7 @@ echo $DATABASE_URL
 # 3. 应用 migration
 npm run prisma:migrate:deploy
 
-# 4. 生成 Prisma Client，本地我已经跑过一次了；部署构建也会跑
+# 4. 生成 Prisma Client，本地跑；部署构建也会跑
 npm run prisma:generate
 
 ```

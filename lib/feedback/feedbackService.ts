@@ -1,5 +1,4 @@
 import { prisma } from "@/lib/persistence/repositories";
-import { enrichMessageIpLocation } from "@/lib/feedback/ipLocation";
 import {
   enqueueFeedbackPushEvent,
   triggerPushDispatch,
@@ -170,12 +169,11 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
       feedbackId: thread.id,
       messageId: message.id,
     });
-    return { thread, messageId: message.id };
+    return { ...thread, userMessageId: message.id };
   });
 
-  void enrichMessageIpLocation(thread.messageId, input.ipAddress);
   triggerPushDispatch();
-  return thread.thread;
+  return thread;
 }
 
 export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInput) {
@@ -236,7 +234,6 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
     return message;
   });
 
-  void enrichMessageIpLocation(message.id, input.ipAddress);
   triggerPushDispatch();
   return message;
 }

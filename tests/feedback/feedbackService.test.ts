@@ -13,11 +13,6 @@ const mockFeedbackMessageCreate = vi.fn();
 const mockFeedbackMessageUpdateMany = vi.fn();
 const mockFeedbackPushEventUpsert = vi.fn();
 const mockTransaction = vi.fn();
-const mockEnrichMessageIpLocation = vi.fn();
-
-vi.mock("@/lib/feedback/ipLocation", () => ({
-  enrichMessageIpLocation: mockEnrichMessageIpLocation,
-}));
 
 vi.mock("@/lib/persistence/repositories", () => ({
   prisma: {
@@ -90,7 +85,7 @@ describe("feedbackService", () => {
         ipAddress: "203.0.113.42",
         message: "希望能支持横版纸张",
       }),
-    ).resolves.toEqual({ id: "fb_123" });
+    ).resolves.toEqual({ id: "fb_123", userMessageId: "msg_123" });
 
     expect(mockFeedbackThreadUpsert).toHaveBeenCalledWith({
       where: {
@@ -137,7 +132,6 @@ describe("feedbackService", () => {
       update: {},
       select: { id: true },
     });
-    expect(mockEnrichMessageIpLocation).toHaveBeenCalledWith("msg_123", "203.0.113.42");
   });
 
   it("creates or reuses one thread when sending user messages", async () => {
@@ -194,7 +188,6 @@ describe("feedbackService", () => {
       update: {},
       select: { id: true },
     });
-    expect(mockEnrichMessageIpLocation).toHaveBeenCalledWith("msg_123", "2001:db8::42");
   });
 
   it("lists feedback summaries with unread admin reply counts", async () => {

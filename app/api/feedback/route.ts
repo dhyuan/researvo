@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { scheduleFeedbackIpLocation } from "@/lib/feedback/ipLocationScheduler";
 import { listFeedbackForInstall, submitFeedback } from "@/lib/feedback/feedbackService";
 import { getClientIp } from "@/lib/http/clientIp";
 
@@ -59,6 +60,8 @@ export async function POST(request: Request) {
   if (!feedback) {
     return json({ error: "INVALID_FEEDBACK_TOKEN" }, { status: 401 });
   }
+
+  scheduleFeedbackIpLocation(feedback.userMessageId, ipAddress);
 
   return json({ ok: true, id: feedback.id, feedbackId: feedback.id });
 }

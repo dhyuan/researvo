@@ -12,6 +12,11 @@ const sendUserFeedbackMessage = vi.fn();
 const updateAdminFeedbackMessage = vi.fn();
 const updateFeedbackStatusAsAdmin = vi.fn();
 const submitFeedback = vi.fn();
+const scheduleFeedbackIpLocation = vi.fn();
+
+vi.mock("@/lib/feedback/ipLocationScheduler", () => ({
+  scheduleFeedbackIpLocation,
+}));
 
 vi.mock("@/lib/feedback/feedbackService", () => ({
   deleteFeedbackThreadAsAdmin,
@@ -49,10 +54,11 @@ describe("feedback route", () => {
     updateAdminFeedbackMessage.mockReset();
     updateFeedbackStatusAsAdmin.mockReset();
     submitFeedback.mockReset();
+    scheduleFeedbackIpLocation.mockReset();
   });
 
   it("stores feedback when the app token matches", async () => {
-    submitFeedback.mockResolvedValueOnce({ id: "feedback_1" });
+    submitFeedback.mockResolvedValueOnce({ id: "feedback_1", userMessageId: "message_1" });
     const { POST } = await import("@/app/api/feedback/route");
 
     const response = await POST(
@@ -74,10 +80,11 @@ describe("feedback route", () => {
       sourceApp: "ChineseHandCopy",
       message: "The copy practice screen needs a larger text area.",
     });
+    expect(scheduleFeedbackIpLocation).toHaveBeenCalledWith("message_1", undefined);
   });
 
   it("accepts optional channel, device, and version fields", async () => {
-    submitFeedback.mockResolvedValueOnce({ id: "feedback_2" });
+    submitFeedback.mockResolvedValueOnce({ id: "feedback_2", userMessageId: "message_2" });
     const { POST } = await import("@/app/api/feedback/route");
 
     const response = await POST(
@@ -111,10 +118,11 @@ describe("feedback route", () => {
       ipAddress: "203.0.113.42",
       message: "The writing panel is hard to use on mobile.",
     });
+    expect(scheduleFeedbackIpLocation).toHaveBeenCalledWith("message_2", "203.0.113.42");
   });
 
   it("accepts parentId when replying to existing feedback", async () => {
-    submitFeedback.mockResolvedValueOnce({ id: "feedback_reply_1" });
+    submitFeedback.mockResolvedValueOnce({ id: "feedback_reply_1", userMessageId: "message_reply_1" });
     const { POST } = await import("@/app/api/feedback/route");
 
     const response = await POST(
@@ -172,7 +180,7 @@ describe("feedback route", () => {
   });
 
   it("stores client install metadata when creating feedback", async () => {
-    submitFeedback.mockResolvedValueOnce({ id: "fb_123" });
+    submitFeedback.mockResolvedValueOnce({ id: "fb_123", userMessageId: "msg_123" });
     const { POST } = await import("@/app/api/feedback/route");
 
     const response = await POST(
@@ -203,6 +211,7 @@ describe("feedback route", () => {
       appVersion: "硬笔临帖 v2.1.4",
       message: "希望能支持横版纸张",
     });
+    expect(scheduleFeedbackIpLocation).toHaveBeenCalledWith("msg_123", undefined);
   });
 
   it("lists feedback for the current install", async () => {
@@ -476,6 +485,7 @@ describe("feedback route", () => {
       ipAddress: "2001:db8::42",
       message: "希望能支持横版纸张",
     });
+    expect(scheduleFeedbackIpLocation).toHaveBeenCalledWith("msg_123", "2001:db8::42");
   });
 
   it("marks the current feedback conversation as read", async () => {

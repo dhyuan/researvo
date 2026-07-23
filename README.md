@@ -33,6 +33,48 @@ FEEDBACK_ADMIN_TOKEN 用于进入 /admin/feedback 后台管理
 printf 'FEEDBACK_ADMIN_TOKEN=%s\n' "$(openssl rand -base64 48)" >> .env
 ```
 
+### Admin PWA and push notifications
+
+The installable PWA is limited to `/admin/*` and reuses the existing
+`/admin/feedback` UI, APIs, and authentication. Production push notifications
+require HTTPS. `localhost` is accepted for local browser development, but a
+phone visiting a LAN HTTP address is not a secure context.
+
+Generate a long-lived VAPID key pair:
+
+```bash
+npm run push:vapid:generate
+```
+
+Add the generated keys and a contact subject to `.env`:
+
+```dotenv
+ADMIN_WEB_PUSH_ENABLED="true"
+WEB_PUSH_VAPID_PUBLIC_KEY="..."
+WEB_PUSH_VAPID_PRIVATE_KEY="..."
+WEB_PUSH_VAPID_SUBJECT="mailto:admin@example.com"
+PUSH_DISPATCH_SECRET="use-a-separate-long-random-secret"
+```
+
+Never expose the VAPID private key or dispatcher secret through a
+`NEXT_PUBLIC_` variable. Push delivery uses a transactional outbox. Configure
+the production scheduler to call the protected drain endpoint every minute:
+
+```bash
+curl --fail-with-body --request POST \
+  --header "Authorization: Bearer ${PUSH_DISPATCH_SECRET}" \
+  "https://your-production-domain.example/api/internal/push/drain"
+```
+
+The endpoint also accepts the secret through `X-Push-Dispatch-Secret`. Do not
+put this secret in a query string or client-side code.
+
+Apply the database migration before enabling the feature. Rotating the VAPID
+key pair requires every device to subscribe again. Rotating
+`FEEDBACK_ADMIN_TOKEN` invalidates existing Admin sessions and stops delivery
+to subscriptions created under the previous token version; sign in and enable
+reminders again on each intended device.
+
 Set `DATABASE_URL` to a PostgreSQL database:
 
 ```bash
@@ -45,6 +87,25 @@ Generate Prisma client and push the schema:
 npm run prisma:generate
 npx prisma db push
 ```
+
+Production deployments should apply committed migrations with:
+
+```bash
+npm run prisma:migrate:deploy
+```
+
+If the database was originally created with `prisma db push` and has no Prisma
+migration history yet, baseline it once before the first deploy:
+
+```bash
+npx prisma migrate resolve --applied 20260722000000_baseline
+npm run prisma:migrate:deploy
+npx prisma migrate status
+```
+
+Only mark the baseline as applied. Do not mark
+`20260723000000_admin_web_push` as applied, because that migration must execute
+to create the Push tables.
 
 Start the app:
 

@@ -1,4 +1,8 @@
 import { prisma } from "@/lib/persistence/repositories";
+import {
+  enqueueFeedbackPushEvent,
+  triggerPushDispatch,
+} from "@/lib/push/pushOutbox";
 
 export type SubmitFeedbackInput = {
   token: string;
@@ -112,7 +116,7 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
     return null;
   }
 
-  return prisma.$transaction(async (tx) => {
+  const thread = await prisma.$transaction(async (tx) => {
     const now = new Date();
     const installId = input.installId ?? "legacy";
     const thread = await tx.feedbackThread.upsert({
@@ -144,7 +148,7 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
       },
     });
 
-    await tx.feedbackMessage.create({
+    const message = await tx.feedbackMessage.create({
       data: {
         feedbackId: thread.id,
         senderType: "user",
@@ -152,10 +156,18 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
         appVersion: input.appVersion ?? input.version,
         ipAddress: input.ipAddress,
       },
+      select: { id: true },
     });
 
+    await enqueueFeedbackPushEvent(tx, {
+      feedbackId: thread.id,
+      messageId: message.id,
+    });
     return thread;
   });
+
+  triggerPushDispatch();
+  return thread;
 }
 
 export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInput) {
@@ -165,7 +177,7 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
     return null;
   }
 
-  return prisma.$transaction(async (tx) => {
+  const message = await prisma.$transaction(async (tx) => {
     const now = new Date();
     const thread = await tx.feedbackThread.upsert({
       where: {
@@ -196,7 +208,7 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
       },
     });
 
-    return tx.feedbackMessage.create({
+    const message = await tx.feedbackMessage.create({
       data: {
         feedbackId: thread.id,
         senderType: "user",
@@ -208,7 +220,16 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
         id: true,
       },
     });
+
+    await enqueueFeedbackPushEvent(tx, {
+      feedbackId: thread.id,
+      messageId: message.id,
+    });
+    return message;
   });
+
+  triggerPushDispatch();
+  return message;
 }
 
 export async function listFeedbackForInstall(input: FeedbackInstallInput) {

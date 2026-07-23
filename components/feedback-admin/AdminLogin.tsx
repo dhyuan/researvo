@@ -12,6 +12,30 @@ type SessionState = {
   configured: boolean;
 };
 
+export function sanitizeAdminDestination(requested: string | null, origin: string) {
+  if (!requested) return "/admin/feedback";
+
+  try {
+    const destination = new URL(requested, origin);
+    if (
+      destination.origin !== origin ||
+      !/^\/admin(?:\/|$)/.test(destination.pathname)
+    ) {
+      return "/admin/feedback";
+    }
+
+    return `${destination.pathname}${destination.search}${destination.hash}`;
+  } catch {
+    return "/admin/feedback";
+  }
+}
+
+function getSafeAdminDestination() {
+  if (typeof window === "undefined") return "/admin/feedback";
+  const requested = new URLSearchParams(window.location.search).get("next");
+  return sanitizeAdminDestination(requested, window.location.origin);
+}
+
 export function AdminLogin() {
   const router = useRouter();
   const [session, setSession] = useState<SessionState | null>(null);
@@ -25,7 +49,7 @@ export function AdminLogin() {
       .then((value: SessionState) => {
         setSession(value);
         if (value.authenticated) {
-          router.replace("/admin/feedback");
+          router.replace(getSafeAdminDestination());
         }
       });
   }, [router]);
@@ -47,7 +71,7 @@ export function AdminLogin() {
         return;
       }
 
-      router.replace("/admin/feedback");
+      router.replace(getSafeAdminDestination());
       router.refresh();
     } catch {
       setError("无法连接到后台服务，请检查网络后重试。");

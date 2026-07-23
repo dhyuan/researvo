@@ -12,9 +12,10 @@ import {
   Tray,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { PushNotificationControl } from "@/components/feedback-admin/PushNotificationControl";
 import { Button } from "@/components/ui/Button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -81,6 +82,9 @@ const statusTones: Record<FeedbackStatus, "warning" | "published" | "success" | 
   ignored: "neutral",
 };
 
+const BACKGROUND_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const SERVICE_WORKER_REFRESH_DEBOUNCE_MS = 300;
+
 function relativeTime(value: string) {
   const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
   const formatter = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
@@ -100,6 +104,11 @@ function dateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(value));
+}
+
+function getDeepLinkedThread() {
+  if (typeof window === "undefined") return null;
+  return new URLSearchParams(window.location.search).get("thread");
 }
 
 function InboxSkeleton() {
@@ -129,7 +138,7 @@ export function FeedbackInboxClient() {
   const [sourceApp, setSourceApp] = useState("");
   const [channel, setChannel] = useState("");
   const [query, setQuery] = useState("");
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(getDeepLinkedThread);
   const [detail, setDetail] = useState<FeedbackDetail | null>(null);
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
@@ -137,7 +146,11 @@ export function FeedbackInboxClient() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [mobileDetail, setMobileDetail] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(() => Boolean(getDeepLinkedThread()));
+  const inboxRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
+  const detailRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
+  const inboxSequenceRef = useRef(0);
+  const detailSequenceRef = useRef(0);
 
   const sourceOptions = useMemo(
     () => Array.from(new Set(items.map((item) => item.sourceApp))).sort(),
@@ -148,21 +161,31 @@ export function FeedbackInboxClient() {
     [items],
   );
 
+  const redirectToLogin = useCallback(() => {
+    const target = `${window.location.pathname}${window.location.search}`;
+    const params = new URLSearchParams({ next: target });
+    router.replace(`/admin/login?${params.toString()}`);
+  }, [router]);
+
   useEffect(() => {
     void fetch("/api/admin/session", { cache: "no-store" })
       .then((response) => response.json())
       .then((session: { authenticated: boolean }) => {
         if (!session.authenticated) {
-          router.replace("/admin/login");
+          redirectToLogin();
           return;
         }
         setAuthorized(true);
       })
-      .catch(() => router.replace("/admin/login"));
-  }, [router]);
+      .catch(redirectToLogin);
+  }, [redirectToLogin]);
 
   const loadInbox = useCallback(async () => {
     if (!authorized) return;
+    inboxRequestRef.current?.controller.abort();
+    const controller = new AbortController();
+    const sequence = ++inboxSequenceRef.current;
+    inboxRequestRef.current = { controller, sequence };
     setLoadingList(true);
     setListError(null);
 
@@ -173,27 +196,35 @@ export function FeedbackInboxClient() {
     if (query.trim()) params.set("q", query.trim());
 
     try {
-      const response = await fetch(`/api/admin/feedback?${params}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/feedback?${params}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
       if (response.status === 401) {
-        router.replace("/admin/login");
+        redirectToLogin();
         return;
       }
       if (!response.ok) throw new Error("LIST_FAILED");
 
       const data = (await response.json()) as InboxResponse;
+      if (sequence !== inboxSequenceRef.current) return;
       const nextItems = status === "needs" ? data.items.filter((item) => item.needsAdminReply) : data.items;
       setItems(nextItems);
       setTotal(status === "needs" ? nextItems.length : data.total);
       setSelectedId((current) => {
-        if (current && nextItems.some((item) => item.id === current)) return current;
+        // Keep a deep-linked or manually selected conversation available even
+        // when the current inbox filters do not contain it.
+        if (current) return current;
         return nextItems[0]?.id ?? null;
       });
-    } catch {
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (sequence !== inboxSequenceRef.current) return;
       setListError("反馈列表加载失败。请检查数据库连接后重试。");
     } finally {
-      setLoadingList(false);
+      if (sequence === inboxSequenceRef.current) setLoadingList(false);
     }
-  }, [authorized, channel, query, router, sourceApp, status]);
+  }, [authorized, channel, query, redirectToLogin, sourceApp, status]);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => void loadInbox(), query ? 250 : 0);
@@ -201,22 +232,39 @@ export function FeedbackInboxClient() {
   }, [loadInbox, query]);
 
   const loadDetail = useCallback(async () => {
+    if (!authorized) return;
     if (!selectedId) {
+      detailRequestRef.current?.controller.abort();
       setDetail(null);
       return;
     }
+    detailRequestRef.current?.controller.abort();
+    const controller = new AbortController();
+    const sequence = ++detailSequenceRef.current;
+    detailRequestRef.current = { controller, sequence };
     setLoadingDetail(true);
     try {
-      const response = await fetch(`/api/admin/feedback/${selectedId}`, { cache: "no-store" });
+      const response = await fetch(`/api/admin/feedback/${encodeURIComponent(selectedId)}`, {
+        cache: "no-store",
+        signal: controller.signal,
+      });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
       if (!response.ok) throw new Error("DETAIL_FAILED");
-      setDetail((await response.json()) as FeedbackDetail);
-    } catch {
+      const data = (await response.json()) as FeedbackDetail;
+      if (sequence !== detailSequenceRef.current) return;
+      setDetail(data);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      if (sequence !== detailSequenceRef.current) return;
       setDetail(null);
       toast.error("无法读取这条反馈的完整对话。");
     } finally {
-      setLoadingDetail(false);
+      if (sequence === detailSequenceRef.current) setLoadingDetail(false);
     }
-  }, [selectedId]);
+  }, [authorized, redirectToLogin, selectedId]);
 
   useEffect(() => {
     // The selected inbox item is the external key for the detail API request.
@@ -224,11 +272,67 @@ export function FeedbackInboxClient() {
     void loadDetail();
   }, [loadDetail]);
 
+  const refreshVisibleInbox = useCallback(() => {
+    if (!authorized || document.visibilityState !== "visible") return;
+    void Promise.all([loadInbox(), loadDetail()]);
+  }, [authorized, loadDetail, loadInbox]);
+
+  const refreshInbox = useCallback(() => {
+    if (!authorized) return;
+    void Promise.all([loadInbox(), loadDetail()]);
+  }, [authorized, loadDetail, loadInbox]);
+
+  useEffect(() => {
+    if (!authorized) return;
+
+    const interval = window.setInterval(refreshVisibleInbox, BACKGROUND_REFRESH_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") refreshVisibleInbox();
+    };
+    const handleFocus = () => refreshVisibleInbox();
+    const handleOnline = () => refreshVisibleInbox();
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("focus", handleFocus);
+    window.addEventListener("online", handleOnline);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("focus", handleFocus);
+      window.removeEventListener("online", handleOnline);
+    };
+  }, [authorized, refreshVisibleInbox]);
+
+  useEffect(() => {
+    if (!authorized || !("serviceWorker" in navigator)) return;
+
+    let debounceTimer: number | undefined;
+    const handleServiceWorkerMessage = () => {
+      window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(refreshInbox, SERVICE_WORKER_REFRESH_DEBOUNCE_MS);
+    };
+
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+    return () => {
+      window.clearTimeout(debounceTimer);
+      navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
+    };
+  }, [authorized, refreshInbox]);
+
+  useEffect(
+    () => () => {
+      inboxRequestRef.current?.controller.abort();
+      detailRequestRef.current?.controller.abort();
+    },
+    [],
+  );
+
   async function sendReply() {
     if (!selectedId || !reply.trim() || sending) return;
     setSending(true);
     try {
-      const response = await fetch(`/api/admin/feedback/${selectedId}/replies`, {
+      const response = await fetch(`/api/admin/feedback/${encodeURIComponent(selectedId)}/replies`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ body: reply.trim() }),
@@ -250,7 +354,7 @@ export function FeedbackInboxClient() {
     setDetail({ ...detail, status: nextStatus });
     setUpdatingStatus(true);
     try {
-      const response = await fetch(`/api/admin/feedback/${selectedId}`, {
+      const response = await fetch(`/api/admin/feedback/${encodeURIComponent(selectedId)}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status: nextStatus }),
@@ -266,9 +370,33 @@ export function FeedbackInboxClient() {
   }
 
   async function logout() {
-    await fetch("/api/admin/session", { method: "DELETE" });
-    router.replace("/admin/login");
-    router.refresh();
+    try {
+      if ("serviceWorker" in navigator && "PushManager" in window) {
+        const registration = await navigator.serviceWorker.getRegistration("/admin/");
+        const subscription = await registration?.pushManager.getSubscription();
+        if (subscription) {
+          const controller = new AbortController();
+          const timeout = window.setTimeout(() => controller.abort(), 3000);
+          try {
+            await fetch("/api/admin/push/subscriptions", {
+              method: "DELETE",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(subscription.toJSON()),
+              signal: controller.signal,
+            });
+          } finally {
+            window.clearTimeout(timeout);
+            await subscription.unsubscribe();
+          }
+        }
+      }
+    } catch {
+      // Push cleanup is best-effort. Session deletion must always continue.
+    } finally {
+      await fetch("/api/admin/session", { method: "DELETE" }).catch(() => undefined);
+      router.replace("/admin/login");
+      router.refresh();
+    }
   }
 
   if (!authorized) {
@@ -326,10 +454,13 @@ export function FeedbackInboxClient() {
                 <h1 className="text-2xl font-semibold tracking-[-0.035em] sm:text-[28px]">反馈收件箱</h1>
                 <p className="mt-1 text-sm text-[#6b756f]">查看新消息、回复用户并维护处理状态。</p>
               </div>
-              <Button aria-label="刷新反馈" onClick={() => void loadInbox()} size="sm" variant="outline">
-                <ArrowClockwise className={cn(loadingList && "animate-spin")} size={16} />
-                <span className="hidden sm:inline">刷新</span>
-              </Button>
+              <div className="flex items-center gap-2">
+                <PushNotificationControl />
+                <Button aria-label="刷新反馈" onClick={refreshVisibleInbox} size="sm" variant="outline">
+                  <ArrowClockwise className={cn(loadingList && "animate-spin")} size={16} />
+                  <span className="hidden sm:inline">刷新</span>
+                </Button>
+              </div>
             </div>
           </header>
 
@@ -449,6 +580,9 @@ export function FeedbackInboxClient() {
                         onClick={() => {
                           setSelectedId(item.id);
                           setMobileDetail(true);
+                          const url = new URL(window.location.href);
+                          url.searchParams.set("thread", item.id);
+                          window.history.replaceState(window.history.state, "", url);
                         }}
                         type="button"
                       >

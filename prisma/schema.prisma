@@ -95,13 +95,13 @@ model SurveyCreationDraft {
 }
 
 model FeedbackApp {
-  id        String           @id @default(cuid())
-  sourceApp String           @unique
-  token     String           @unique
-  createdAt DateTime         @default(now())
-  updatedAt DateTime         @updatedAt
+  id            String                @id @default(cuid())
+  sourceApp     String                @unique
+  token         String                @unique
+  createdAt     DateTime              @default(now())
+  updatedAt     DateTime              @updatedAt
   legacyEntries LegacyFeedbackEntry[]
-  threads   FeedbackThread[]
+  threads       FeedbackThread[]
 }
 
 model LegacyFeedbackEntry {
@@ -119,21 +119,22 @@ model LegacyFeedbackEntry {
 }
 
 model FeedbackThread {
-  id               String            @id @default(cuid())
+  id               String              @id @default(cuid())
   feedbackAppId    String
   sourceApp        String
   channel          String
   installId        String
   device           String?
   appVersion       String?
-  message          String            @db.Text
-  status           String            @default("open")
+  message          String              @db.Text
+  status           String              @default("open")
   userLastReadAt   DateTime?
   lastAdminReplyAt DateTime?
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
-  feedbackApp      FeedbackApp       @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  feedbackApp      FeedbackApp         @relation(fields: [feedbackAppId], references: [id], onDelete: Cascade)
   messages         FeedbackMessage[]
+  pushEvents       FeedbackPushEvent[]
 
   @@unique([sourceApp, installId])
   @@index([sourceApp, installId, updatedAt])
@@ -141,17 +142,78 @@ model FeedbackThread {
 }
 
 model FeedbackMessage {
-  id         String         @id @default(cuid())
+  id         String             @id @default(cuid())
   feedbackId String
   senderType String
-  body       String         @db.Text
+  body       String             @db.Text
   appVersion String?
   ipAddress  String?
-  createdAt  DateTime       @default(now())
-  feedback   FeedbackThread @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  createdAt  DateTime           @default(now())
+  feedback   FeedbackThread     @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  pushEvent  FeedbackPushEvent?
 
   @@index([feedbackId, createdAt])
   @@map("feedback_messages")
+}
+
+model AdminPushSubscription {
+  id               String                 @id @default(cuid())
+  endpoint         String                 @db.Text
+  endpointHash     String                 @unique
+  p256dh           String                 @db.Text
+  auth             String                 @db.Text
+  expirationTime   BigInt?
+  userAgent        String?                @db.Text
+  adminAuthVersion String
+  status           String                 @default("active")
+  failureCount     Int                    @default(0)
+  lastSuccessAt    DateTime?
+  lastFailureAt    DateTime?
+  createdAt        DateTime               @default(now())
+  updatedAt        DateTime               @updatedAt
+  deliveries       FeedbackPushDelivery[]
+
+  @@index([status, adminAuthVersion])
+  @@map("admin_push_subscriptions")
+}
+
+model FeedbackPushEvent {
+  id            String                 @id @default(cuid())
+  feedbackId    String
+  messageId     String                 @unique
+  eventType     String                 @default("user_feedback_message")
+  status        String                 @default("pending")
+  attemptCount  Int                    @default(0)
+  nextAttemptAt DateTime               @default(now())
+  lockedAt      DateTime?
+  deliveredAt   DateTime?
+  lastErrorCode String?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  feedback      FeedbackThread         @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
+  message       FeedbackMessage        @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  deliveries    FeedbackPushDelivery[]
+
+  @@index([status, nextAttemptAt])
+  @@map("feedback_push_events")
+}
+
+model FeedbackPushDelivery {
+  id             String                @id @default(cuid())
+  eventId        String
+  subscriptionId String
+  status         String                @default("pending")
+  attemptCount   Int                   @default(0)
+  deliveredAt    DateTime?
+  lastErrorCode  String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+  event          FeedbackPushEvent     @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  subscription   AdminPushSubscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@unique([eventId, subscriptionId])
+  @@index([eventId, status])
+  @@map("feedback_push_deliveries")
 }
 
 model Survey {

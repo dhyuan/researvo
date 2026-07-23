@@ -9,6 +9,7 @@ const mockFeedbackThreadUpdate = vi.fn();
 const mockFeedbackThreadUpdateMany = vi.fn();
 const mockFeedbackThreadUpsert = vi.fn();
 const mockFeedbackMessageCreate = vi.fn();
+const mockFeedbackPushEventUpsert = vi.fn();
 const mockTransaction = vi.fn();
 
 vi.mock("@/lib/persistence/repositories", () => ({
@@ -29,6 +30,9 @@ vi.mock("@/lib/persistence/repositories", () => ({
     feedbackMessage: {
       create: mockFeedbackMessageCreate,
     },
+    feedbackPushEvent: {
+      upsert: mockFeedbackPushEventUpsert,
+    },
   },
 }));
 
@@ -40,13 +44,17 @@ const app = {
 
 describe("feedbackService", () => {
   afterEach(() => {
+    delete process.env.ADMIN_WEB_PUSH_ENABLED;
     vi.resetModules();
     vi.clearAllMocks();
   });
 
   it("creates a feedback thread and initial user message", async () => {
+    process.env.ADMIN_WEB_PUSH_ENABLED = "true";
     mockFeedbackAppFindUnique.mockResolvedValue(app);
     mockFeedbackThreadUpsert.mockResolvedValue({ id: "fb_123" });
+    mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_123" });
+    mockFeedbackPushEventUpsert.mockResolvedValue({ id: "push_123" });
     mockTransaction.mockImplementation(async (callback) =>
       callback({
         feedbackThread: {
@@ -54,6 +62,9 @@ describe("feedbackService", () => {
         },
         feedbackMessage: {
           create: mockFeedbackMessageCreate,
+        },
+        feedbackPushEvent: {
+          upsert: mockFeedbackPushEventUpsert,
         },
       }),
     );
@@ -106,14 +117,26 @@ describe("feedbackService", () => {
         appVersion: "硬笔临帖 v2.1.4",
         ipAddress: "203.0.113.42",
       },
+      select: { id: true },
+    });
+    expect(mockFeedbackPushEventUpsert).toHaveBeenCalledWith({
+      where: { messageId: "msg_123" },
+      create: {
+        feedbackId: "fb_123",
+        messageId: "msg_123",
+      },
+      update: {},
+      select: { id: true },
     });
   });
 
   it("creates or reuses one thread when sending user messages", async () => {
+    process.env.ADMIN_WEB_PUSH_ENABLED = "true";
     mockFeedbackAppFindUnique.mockResolvedValue(app);
     mockFeedbackThreadCreate.mockResolvedValue({ id: "fb_123" });
     mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
     mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_123" });
+    mockFeedbackPushEventUpsert.mockResolvedValue({ id: "push_123" });
     mockTransaction.mockImplementation(async (callback) =>
       callback({
         feedbackThread: {
@@ -121,6 +144,9 @@ describe("feedbackService", () => {
         },
         feedbackMessage: {
           create: mockFeedbackMessageCreate,
+        },
+        feedbackPushEvent: {
+          upsert: mockFeedbackPushEventUpsert,
         },
       }),
     );
@@ -147,6 +173,15 @@ describe("feedbackService", () => {
         appVersion: "硬笔临帖 v2.1.4",
         ipAddress: "2001:db8::42",
       },
+      select: { id: true },
+    });
+    expect(mockFeedbackPushEventUpsert).toHaveBeenCalledWith({
+      where: { messageId: "msg_123" },
+      create: {
+        feedbackId: "fb_123",
+        messageId: "msg_123",
+      },
+      update: {},
       select: { id: true },
     });
   });

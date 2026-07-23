@@ -5,11 +5,15 @@ import {
   ArrowLeft,
   ChatCircleDots,
   Check,
+  FloppyDisk,
   FunnelSimple,
   MagnifyingGlass,
   PaperPlaneTilt,
+  PencilSimple,
   SignOut,
   Tray,
+  Trash,
+  X,
 } from "@phosphor-icons/react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -52,6 +56,16 @@ type Message = {
   senderType: string;
   body: string;
   appVersion: string | null;
+  ipAddress: string | null;
+  ipLocation: {
+    city?: string;
+    region?: string;
+    country?: string;
+    countryCode?: string;
+    isp?: string;
+    org?: string;
+    asn?: number;
+  } | null;
   createdAt: string;
 };
 
@@ -106,6 +120,16 @@ function dateTime(value: string) {
   }).format(new Date(value));
 }
 
+function formatIpLocation(message: Message) {
+  if (!message.ipAddress) return "IP：未记录";
+  const location = message.ipLocation;
+  if (!location) return `IP：${message.ipAddress} · 地址：查询中`;
+
+  const place = [location.city, location.region, location.country].filter(Boolean).join(" / ");
+  const network = [location.isp || location.org, location.asn ? `AS${location.asn}` : null].filter(Boolean).join(" · ");
+  return `IP：${message.ipAddress}${place ? ` · 地址：${place}` : ""}${network ? ` · ${network}` : ""}`;
+}
+
 function getDeepLinkedThread() {
   if (typeof window === "undefined") return null;
   return new URLSearchParams(window.location.search).get("thread");
@@ -146,6 +170,10 @@ export function FeedbackInboxClient() {
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [deletingThread, setDeletingThread] = useState(false);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingBody, setEditingBody] = useState("");
+  const [savingMessage, setSavingMessage] = useState(false);
   const [mobileDetail, setMobileDetail] = useState(() => Boolean(getDeepLinkedThread()));
   const inboxRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
   const detailRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
@@ -366,6 +394,73 @@ export function FeedbackInboxClient() {
       toast.error("状态更新失败，已恢复原状态。");
     } finally {
       setUpdatingStatus(false);
+    }
+  }
+
+  async function deleteThread() {
+    if (!selectedId || deletingThread) return;
+    const confirmed = window.confirm("确认删除这整条反馈对话？这会同时删除所有消息。");
+    if (!confirmed) return;
+
+    setDeletingThread(true);
+    const deletedId = selectedId;
+    try {
+      const response = await fetch(`/api/admin/feedback/${encodeURIComponent(deletedId)}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) throw new Error("DELETE_FAILED");
+
+      setDetail(null);
+      setSelectedId(null);
+      setItems((current) => current.filter((item) => item.id !== deletedId));
+      const url = new URL(window.location.href);
+      url.searchParams.delete("thread");
+      window.history.replaceState(window.history.state, "", url);
+      await loadInbox();
+      toast.success("对话已删除");
+    } catch {
+      toast.error("删除失败，请稍后重试。");
+    } finally {
+      setDeletingThread(false);
+    }
+  }
+
+  function startEditingMessage(message: Message) {
+    setEditingMessageId(message.id);
+    setEditingBody(message.body);
+  }
+
+  async function saveMessageEdit(message: Message) {
+    if (!selectedId || savingMessage || !editingBody.trim()) return;
+    setSavingMessage(true);
+    try {
+      const response = await fetch(
+        `/api/admin/feedback/${encodeURIComponent(selectedId)}/messages/${encodeURIComponent(message.id)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ body: editingBody.trim() }),
+        },
+      );
+      if (!response.ok) throw new Error("MESSAGE_UPDATE_FAILED");
+
+      setDetail((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          messages: current.messages.map((item) =>
+            item.id === message.id ? { ...item, body: editingBody.trim() } : item,
+          ),
+        };
+      });
+      setEditingMessageId(null);
+      setEditingBody("");
+      await loadInbox();
+      toast.success("消息已更新");
+    } catch {
+      toast.error("消息修改失败。");
+    } finally {
+      setSavingMessage(false);
     }
   }
 
@@ -646,6 +741,16 @@ export function FeedbackInboxClient() {
                               {Object.entries(statusLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                             </select>
                           </label>
+                          <Button
+                            aria-label="删除整条反馈对话"
+                            disabled={deletingThread}
+                            onClick={() => void deleteThread()}
+                            size="icon-sm"
+                            title="删除对话"
+                            variant="danger"
+                          >
+                            <Trash size={16} />
+                          </Button>
                         </div>
                         <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 border-t border-[#edf0ec] pt-3 text-[11px] text-[#758079]">
                           <span>设备：{detail.device || "未提供"}</span>
@@ -657,6 +762,7 @@ export function FeedbackInboxClient() {
                       <div className="flex-1 space-y-5 overflow-y-auto px-5 py-6 sm:px-7" aria-live="polite">
                         {detail.messages.map((message) => {
                           const isAdmin = message.senderType === "admin";
+                          const isEditing = editingMessageId === message.id;
                           return (
                             <article className={cn("flex", isAdmin ? "justify-end" : "justify-start")} key={message.id}>
                               <div className={cn("max-w-[82%]", isAdmin && "text-right")}>
@@ -671,7 +777,52 @@ export function FeedbackInboxClient() {
                                     ? "rounded-tr-sm border border-[#cddfd6] bg-[#e6f0eb] text-[#20372f]"
                                     : "rounded-tl-sm border border-[#dde1dc] bg-white text-[#303a35]",
                                 )}>
-                                  <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                                  {isEditing ? (
+                                    <div className="space-y-2">
+                                      <Textarea
+                                        className="min-h-24 resize-y bg-white text-sm"
+                                        onChange={(event) => setEditingBody(event.target.value)}
+                                        value={editingBody}
+                                      />
+                                      <div className="flex justify-end gap-2">
+                                        <Button
+                                          disabled={savingMessage}
+                                          onClick={() => {
+                                            setEditingMessageId(null);
+                                            setEditingBody("");
+                                          }}
+                                          size="xs"
+                                          variant="outline"
+                                        >
+                                          <X size={13} />
+                                          取消
+                                        </Button>
+                                        <Button
+                                          disabled={!editingBody.trim() || savingMessage}
+                                          onClick={() => void saveMessageEdit(message)}
+                                          size="xs"
+                                        >
+                                          <FloppyDisk size={13} />
+                                          保存
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <p className="whitespace-pre-wrap break-words">{message.body}</p>
+                                  )}
+                                </div>
+                                <div className={cn("mt-1.5 flex items-center gap-2 text-[10px] text-[#7b8680]", isAdmin && "justify-end")}>
+                                  {!isAdmin ? <span className="break-all normal-case">{formatIpLocation(message)}</span> : null}
+                                  {isAdmin && !isEditing ? (
+                                    <button
+                                      className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[#4f6258] hover:bg-[#d8e7df]"
+                                      onClick={() => startEditingMessage(message)}
+                                      type="button"
+                                    >
+                                      <PencilSimple size={12} />
+                                      修改
+                                    </button>
+                                  ) : null}
                                 </div>
                               </div>
                             </article>

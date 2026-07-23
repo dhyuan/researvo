@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { isFeedbackAdminAuthorized } from "@/lib/feedback/adminAuth";
 import {
+  deleteFeedbackThreadAsAdmin,
   getFeedbackThreadForAdmin,
   updateFeedbackStatusAsAdmin,
 } from "@/lib/feedback/feedbackService";
@@ -79,4 +80,23 @@ export async function PATCH(
   });
 
   return json({ id: feedback.id });
+}
+
+export async function DELETE(
+  request: Request,
+  context: { params: Promise<{ feedbackId: string }> },
+) {
+  const authResponse = await authorizeAdmin(request);
+  if (authResponse) {
+    return authResponse;
+  }
+
+  const { feedbackId } = await context.params;
+  const deleted = await deleteFeedbackThreadAsAdmin(feedbackId);
+
+  if (!deleted) {
+    return json({ error: "FEEDBACK_NOT_FOUND" }, { status: 404 });
+  }
+
+  return new Response(null, { status: 204 });
 }

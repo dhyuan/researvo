@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/persistence/repositories";
+import { enrichMessageIpLocation } from "@/lib/feedback/ipLocation";
 import {
   enqueueFeedbackPushEvent,
   triggerPushDispatch,
@@ -55,6 +56,12 @@ export type AdminFeedbackReplyInput = {
 export type AdminFeedbackStatusInput = {
   feedbackId: string;
   status: string;
+};
+
+export type AdminFeedbackMessageUpdateInput = {
+  feedbackId: string;
+  messageId: string;
+  body: string;
 };
 
 type FeedbackThreadWithMessages = Awaited<
@@ -163,11 +170,12 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
       feedbackId: thread.id,
       messageId: message.id,
     });
-    return thread;
+    return { thread, messageId: message.id };
   });
 
+  void enrichMessageIpLocation(thread.messageId, input.ipAddress);
   triggerPushDispatch();
-  return thread;
+  return thread.thread;
 }
 
 export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInput) {
@@ -228,6 +236,7 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
     return message;
   });
 
+  void enrichMessageIpLocation(message.id, input.ipAddress);
   triggerPushDispatch();
   return message;
 }
@@ -514,6 +523,8 @@ export async function getFeedbackThreadForAdmin(feedbackId: string) {
           senderType: true,
           body: true,
           appVersion: true,
+          ipAddress: true,
+          ipLocation: true,
           createdAt: true,
         },
       },
@@ -541,6 +552,41 @@ export async function getFeedbackThreadForAdmin(feedbackId: string) {
       createdAt: message.createdAt.toISOString(),
     })),
   };
+}
+
+export async function deleteFeedbackThreadAsAdmin(feedbackId: string) {
+  const result = await prisma.feedbackThread.deleteMany({
+    where: { id: feedbackId },
+  });
+
+  return result.count > 0;
+}
+
+export async function updateAdminFeedbackMessage(input: AdminFeedbackMessageUpdateInput) {
+  const message = await prisma.feedbackMessage.updateMany({
+    where: {
+      id: input.messageId,
+      feedbackId: input.feedbackId,
+      senderType: "admin",
+    },
+    data: {
+      body: input.body,
+    },
+  });
+
+  if (message.count === 0) {
+    return null;
+  }
+
+  const thread = await prisma.feedbackThread.update({
+    where: { id: input.feedbackId },
+    data: {
+      updatedAt: new Date(),
+    },
+    select: { id: true },
+  });
+
+  return thread;
 }
 
 export async function updateFeedbackStatusAsAdmin(input: AdminFeedbackStatusInput) {

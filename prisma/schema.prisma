@@ -148,6 +148,7 @@ model FeedbackMessage {
   body       String             @db.Text
   appVersion String?
   ipAddress  String?
+  ipLocation Json?
   createdAt  DateTime           @default(now())
   feedback   FeedbackThread     @relation(fields: [feedbackId], references: [id], onDelete: Cascade)
   pushEvent  FeedbackPushEvent?

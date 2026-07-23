@@ -8,9 +8,16 @@ const mockFeedbackThreadFindUnique = vi.fn();
 const mockFeedbackThreadUpdate = vi.fn();
 const mockFeedbackThreadUpdateMany = vi.fn();
 const mockFeedbackThreadUpsert = vi.fn();
+const mockFeedbackThreadDeleteMany = vi.fn();
 const mockFeedbackMessageCreate = vi.fn();
+const mockFeedbackMessageUpdateMany = vi.fn();
 const mockFeedbackPushEventUpsert = vi.fn();
 const mockTransaction = vi.fn();
+const mockEnrichMessageIpLocation = vi.fn();
+
+vi.mock("@/lib/feedback/ipLocation", () => ({
+  enrichMessageIpLocation: mockEnrichMessageIpLocation,
+}));
 
 vi.mock("@/lib/persistence/repositories", () => ({
   prisma: {
@@ -26,9 +33,11 @@ vi.mock("@/lib/persistence/repositories", () => ({
       update: mockFeedbackThreadUpdate,
       updateMany: mockFeedbackThreadUpdateMany,
       upsert: mockFeedbackThreadUpsert,
+      deleteMany: mockFeedbackThreadDeleteMany,
     },
     feedbackMessage: {
       create: mockFeedbackMessageCreate,
+      updateMany: mockFeedbackMessageUpdateMany,
     },
     feedbackPushEvent: {
       upsert: mockFeedbackPushEventUpsert,
@@ -128,6 +137,7 @@ describe("feedbackService", () => {
       update: {},
       select: { id: true },
     });
+    expect(mockEnrichMessageIpLocation).toHaveBeenCalledWith("msg_123", "203.0.113.42");
   });
 
   it("creates or reuses one thread when sending user messages", async () => {
@@ -184,6 +194,7 @@ describe("feedbackService", () => {
       update: {},
       select: { id: true },
     });
+    expect(mockEnrichMessageIpLocation).toHaveBeenCalledWith("msg_123", "2001:db8::42");
   });
 
   it("lists feedback summaries with unread admin reply counts", async () => {
@@ -343,6 +354,42 @@ describe("feedbackService", () => {
         status: "replied",
         lastAdminReplyAt: expect.any(Date),
         updatedAt: expect.any(Date),
+      },
+    });
+  });
+
+  it("deletes a feedback thread for admin", async () => {
+    mockFeedbackThreadDeleteMany.mockResolvedValue({ count: 1 });
+    const { deleteFeedbackThreadAsAdmin } = await import("@/lib/feedback/feedbackService");
+
+    await expect(deleteFeedbackThreadAsAdmin("fb_123")).resolves.toBe(true);
+
+    expect(mockFeedbackThreadDeleteMany).toHaveBeenCalledWith({
+      where: { id: "fb_123" },
+    });
+  });
+
+  it("updates only admin-authored messages", async () => {
+    mockFeedbackMessageUpdateMany.mockResolvedValue({ count: 1 });
+    mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
+    const { updateAdminFeedbackMessage } = await import("@/lib/feedback/feedbackService");
+
+    await expect(
+      updateAdminFeedbackMessage({
+        feedbackId: "fb_123",
+        messageId: "msg_admin_1",
+        body: "更新后的回复",
+      }),
+    ).resolves.toEqual({ id: "fb_123" });
+
+    expect(mockFeedbackMessageUpdateMany).toHaveBeenCalledWith({
+      where: {
+        id: "msg_admin_1",
+        feedbackId: "fb_123",
+        senderType: "admin",
+      },
+      data: {
+        body: "更新后的回复",
       },
     });
   });

@@ -81,13 +81,6 @@ Set `DATABASE_URL` to a PostgreSQL database:
 DATABASE_URL="postgresql://postgres:postgres@localhost:5432/humansignal?schema=public"
 ```
 
-Generate Prisma client and push the schema:
-
-```bash
-npm run prisma:generate
-npx prisma db push
-```
-
 Production deployments should apply committed migrations with:
 
 ```bash

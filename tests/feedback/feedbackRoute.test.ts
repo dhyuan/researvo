@@ -2,16 +2,19 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const getFeedbackDetail = vi.fn();
 const getCurrentFeedbackThread = vi.fn();
+const deleteFeedbackThreadAsAdmin = vi.fn();
 const listFeedbackForInstall = vi.fn();
 const listFeedbackThreadsForAdmin = vi.fn();
 const markFeedbackRepliesRead = vi.fn();
 const markCurrentFeedbackThreadRead = vi.fn();
 const replyToFeedbackAsAdmin = vi.fn();
 const sendUserFeedbackMessage = vi.fn();
+const updateAdminFeedbackMessage = vi.fn();
 const updateFeedbackStatusAsAdmin = vi.fn();
 const submitFeedback = vi.fn();
 
 vi.mock("@/lib/feedback/feedbackService", () => ({
+  deleteFeedbackThreadAsAdmin,
   getFeedbackDetail,
   getCurrentFeedbackThread,
   listFeedbackForInstall,
@@ -21,6 +24,7 @@ vi.mock("@/lib/feedback/feedbackService", () => ({
   replyToFeedbackAsAdmin,
   sendUserFeedbackMessage,
   submitFeedback,
+  updateAdminFeedbackMessage,
   updateFeedbackStatusAsAdmin,
 }));
 
@@ -35,12 +39,14 @@ describe("feedback route", () => {
   beforeEach(() => {
     getFeedbackDetail.mockReset();
     getCurrentFeedbackThread.mockReset();
+    deleteFeedbackThreadAsAdmin.mockReset();
     listFeedbackForInstall.mockReset();
     listFeedbackThreadsForAdmin.mockReset();
     markFeedbackRepliesRead.mockReset();
     markCurrentFeedbackThreadRead.mockReset();
     replyToFeedbackAsAdmin.mockReset();
     sendUserFeedbackMessage.mockReset();
+    updateAdminFeedbackMessage.mockReset();
     updateFeedbackStatusAsAdmin.mockReset();
     submitFeedback.mockReset();
   });
@@ -564,6 +570,44 @@ describe("feedback route", () => {
     expect(updateFeedbackStatusAsAdmin).toHaveBeenCalledWith({
       feedbackId: "fb_123",
       status: "resolved",
+    });
+  });
+
+  it("deletes a feedback thread for admin", async () => {
+    deleteFeedbackThreadAsAdmin.mockResolvedValueOnce(true);
+    const { DELETE } = await import("@/app/api/admin/feedback/[feedbackId]/route");
+
+    const response = await DELETE(
+      new Request("http://localhost/api/admin/feedback/fb_123", {
+        method: "DELETE",
+      }),
+      { params: Promise.resolve({ feedbackId: "fb_123" }) },
+    );
+
+    expect(response.status).toBe(204);
+    expect(await response.text()).toBe("");
+    expect(deleteFeedbackThreadAsAdmin).toHaveBeenCalledWith("fb_123");
+  });
+
+  it("updates an admin-authored feedback message", async () => {
+    updateAdminFeedbackMessage.mockResolvedValueOnce({ id: "fb_123" });
+    const { PATCH } = await import("@/app/api/admin/feedback/[feedbackId]/messages/[messageId]/route");
+
+    const response = await PATCH(
+      new Request("http://localhost/api/admin/feedback/fb_123/messages/msg_admin_1", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json; charset=utf-8" },
+        body: JSON.stringify({ body: " 更新后的回复 " }),
+      }),
+      { params: Promise.resolve({ feedbackId: "fb_123", messageId: "msg_admin_1" }) },
+    );
+
+    await expect(response.json()).resolves.toEqual({ id: "msg_admin_1" });
+    expect(response.status).toBe(200);
+    expect(updateAdminFeedbackMessage).toHaveBeenCalledWith({
+      feedbackId: "fb_123",
+      messageId: "msg_admin_1",
+      body: "更新后的回复",
     });
   });
 });

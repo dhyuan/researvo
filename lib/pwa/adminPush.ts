@@ -14,3 +14,25 @@ export function base64UrlToUint8Array(value: string): Uint8Array<ArrayBuffer> {
 export function isIosDevice(userAgent: string, platform: string, touchPoints: number): boolean {
   return /iPad|iPhone|iPod/.test(userAgent) || (platform === "MacIntel" && touchPoints > 1);
 }
+
+export type AdminPushCapability =
+  | "supported"
+  | "insecure"
+  | "ios-install-required"
+  | "unsupported";
+
+export function getAdminPushCapability(input: {
+  secureContext: boolean;
+  ios: boolean;
+  standalone: boolean;
+  serviceWorker: boolean;
+  pushManager: boolean;
+  notifications: boolean;
+}): AdminPushCapability {
+  if (!input.secureContext) return "insecure";
+  if (input.ios && !input.standalone) return "ios-install-required";
+  if (!input.serviceWorker || !input.pushManager || !input.notifications) {
+    return "unsupported";
+  }
+  return "supported";
+}

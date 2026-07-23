@@ -13,7 +13,11 @@ import { usePathname } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/Button";
-import { base64UrlToUint8Array, isIosDevice } from "@/lib/pwa/adminPush";
+import {
+  base64UrlToUint8Array,
+  getAdminPushCapability,
+  isIosDevice,
+} from "@/lib/pwa/adminPush";
 import { cn } from "@/lib/utils";
 
 type PushState =
@@ -61,23 +65,24 @@ export function PushNotificationControl() {
   }, []);
 
   const inspect = useCallback(async () => {
-    if (!window.isSecureContext) {
-      setState("insecure");
-      return;
-    }
-    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-      setState("unsupported");
-      return;
-    }
-
     const ios = isIosDevice(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
     const standalone =
       window.matchMedia("(display-mode: standalone)").matches ||
       ("standalone" in navigator && (navigator as Navigator & { standalone?: boolean }).standalone === true);
-    if (ios && !standalone) {
-      setState("ios-install-required");
+
+    const capability = getAdminPushCapability({
+      secureContext: window.isSecureContext,
+      ios,
+      standalone,
+      serviceWorker: "serviceWorker" in navigator,
+      pushManager: "PushManager" in window,
+      notifications: "Notification" in window,
+    });
+    if (capability !== "supported") {
+      setState(capability);
       return;
     }
+
     if (Notification.permission === "denied") {
       setState("denied");
       return;

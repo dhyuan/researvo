@@ -498,7 +498,7 @@ export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput)
               createdAt: latestMessage.createdAt.toISOString(),
             }
           : null,
-        needsAdminReply: latestMessage?.senderType === "user",
+        needsAdminReply: thread.status === "open" && latestMessage?.senderType === "user",
       };
     }),
     page: input.page,

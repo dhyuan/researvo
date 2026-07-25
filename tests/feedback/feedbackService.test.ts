@@ -5,6 +5,7 @@ const mockFeedbackThreadCreate = vi.fn();
 const mockFeedbackThreadFindFirst = vi.fn();
 const mockFeedbackThreadFindMany = vi.fn();
 const mockFeedbackThreadFindUnique = vi.fn();
+const mockFeedbackThreadCount = vi.fn();
 const mockFeedbackThreadUpdate = vi.fn();
 const mockFeedbackThreadUpdateMany = vi.fn();
 const mockFeedbackThreadUpsert = vi.fn();
@@ -25,6 +26,7 @@ vi.mock("@/lib/persistence/repositories", () => ({
       findFirst: mockFeedbackThreadFindFirst,
       findMany: mockFeedbackThreadFindMany,
       findUnique: mockFeedbackThreadFindUnique,
+      count: mockFeedbackThreadCount,
       update: mockFeedbackThreadUpdate,
       updateMany: mockFeedbackThreadUpdateMany,
       upsert: mockFeedbackThreadUpsert,
@@ -257,6 +259,43 @@ describe("feedbackService", () => {
       },
       orderBy: { updatedAt: "desc" },
     });
+  });
+
+  it("only marks open conversations with a latest user message as needing a reply", async () => {
+    const baseThread = {
+      message: "用户消息",
+      createdAt: new Date("2026-06-24T10:00:00.000Z"),
+      updatedAt: new Date("2026-06-24T11:00:00.000Z"),
+      lastAdminReplyAt: null,
+      sourceApp: "ChineseHandCopy",
+      installId: "install_19a",
+      channel: "google_play",
+      device: "iPhone 15 Pro",
+      appVersion: "2.1.4",
+      _count: { messages: 1 },
+      messages: [{
+        id: "msg_user",
+        feedbackId: "fb_open",
+        senderType: "user",
+        body: "用户消息",
+        createdAt: new Date("2026-06-24T11:00:00.000Z"),
+      }],
+    };
+    mockFeedbackThreadFindMany.mockResolvedValue([
+      { ...baseThread, id: "fb_open", status: "open" },
+      { ...baseThread, id: "fb_replied", status: "replied" },
+      { ...baseThread, id: "fb_resolved", status: "resolved" },
+    ]);
+    mockFeedbackThreadCount.mockResolvedValue(3);
+    const { listFeedbackThreadsForAdmin } = await import("@/lib/feedback/feedbackService");
+
+    const result = await listFeedbackThreadsForAdmin({ page: 1, pageSize: 20 });
+
+    expect(result.items.map((item) => [item.status, item.needsAdminReply])).toEqual([
+      ["open", true],
+      ["replied", false],
+      ["resolved", false],
+    ]);
   });
 
   it("marks replies as read only for the matching install", async () => {

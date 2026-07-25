@@ -249,8 +249,13 @@ export function PushNotificationControl() {
 
   if (state === "checking") {
     return (
-      <div className="fixed bottom-4 right-4 z-50 rounded-full border border-[#d3dad4] bg-white/95 px-3 py-2 text-xs text-[#68736d] shadow-lg backdrop-blur">
-        正在检查新消息提醒…
+      <div
+        aria-label="正在检查新消息提醒"
+        className="inline-flex size-9 items-center justify-center rounded-lg border border-[#d3dad4] bg-white text-[#68736d] sm:h-9 sm:w-auto sm:gap-2 sm:px-3"
+        role="status"
+      >
+        <Bell className="animate-pulse" size={17} />
+        <span className="hidden text-xs sm:inline">检查提醒…</span>
       </div>
     );
   }
@@ -259,8 +264,9 @@ export function PushNotificationControl() {
     const compactLabel = copy?.title ?? (state === "enabled" ? "提醒已开启" : "开启新消息提醒");
     return (
       <button
+        aria-label={compactLabel}
         className={cn(
-          "fixed bottom-4 right-4 z-50 inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-sm font-semibold shadow-[0_14px_35px_-18px_rgba(16,42,34,.72)] transition hover:-translate-y-0.5",
+          "relative inline-flex size-9 items-center justify-center rounded-lg border text-sm font-semibold transition hover:-translate-y-0.5 sm:h-9 sm:w-auto sm:gap-2 sm:px-3",
           state === "enabled"
             ? "border-[#b9d4c6] bg-[#e8f2ed] text-[#245a4c]"
             : blocked
@@ -271,73 +277,88 @@ export function PushNotificationControl() {
         type="button"
       >
         {state === "enabled" ? <CheckCircle size={18} weight="fill" /> : <Bell size={18} weight="duotone" />}
-        {busy ? "正在开启…" : compactLabel}
+        <span className="hidden sm:inline">{busy ? "正在开启…" : compactLabel}</span>
+        <span
+          aria-hidden="true"
+          className={cn(
+            "absolute right-1.5 top-1.5 size-1.5 rounded-full ring-2 ring-white sm:hidden",
+            state === "enabled" ? "bg-[#2c725f]" : blocked ? "bg-[#a87835]" : "bg-[#d6e5de]",
+          )}
+        />
       </button>
     );
   }
 
   return (
-    <aside
-      aria-label="新消息提醒设置"
-      className="fixed inset-x-3 bottom-3 z-50 ml-auto max-w-[360px] overflow-hidden rounded-2xl border border-[#cfd7d1] bg-[#fbfcf9]/97 text-[#1d2823] shadow-[0_24px_70px_-24px_rgba(15,39,31,.55)] backdrop-blur sm:inset-x-auto sm:bottom-5 sm:right-5 sm:w-[360px]"
-    >
-      <div className="border-b border-[#e0e5e0] bg-[#22332c] px-5 py-4 text-white">
-        <div className="flex items-start justify-between gap-4">
-          <div className="flex gap-3">
-            <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d9e9e1]">
-              {state === "ios-install-required" ? <DeviceMobile size={20} /> : <BellRinging size={20} weight="duotone" />}
-            </span>
-            <div>
-              <h2 className="text-sm font-semibold">{copy?.title ?? "新消息提醒"}</h2>
-              <p className="mt-1 text-[11px] leading-4 text-[#aebfb6]">Researvo Feedback Admin</p>
-            </div>
-          </div>
-          <button
-            aria-label="收起通知设置"
-            className="rounded-md p-1 text-[#b8c7bf] transition hover:bg-white/10 hover:text-white"
-            onClick={() => setExpanded(false)}
-            type="button"
-          >
-            <X size={16} />
-          </button>
-        </div>
-      </div>
-
-      <div className="p-5">
-        {copy ? (
-          <div className="flex gap-3 text-sm leading-6 text-[#56635d]">
-            <WarningCircle className="mt-1 shrink-0 text-[#9c6b29]" size={18} weight="duotone" />
-            <p>{copy.body}</p>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-start gap-3">
-              <CheckCircle className="mt-0.5 shrink-0 text-[#2c725f]" size={19} weight="fill" />
+    <div className="relative">
+      <button
+        aria-label="关闭通知设置"
+        className="fixed inset-0 z-40 bg-[#14231d]/20 backdrop-blur-[1px] sm:hidden"
+        onClick={() => setExpanded(false)}
+        type="button"
+      />
+      <aside
+        aria-label="新消息提醒设置"
+        className="fixed inset-x-3 top-[calc(env(safe-area-inset-top)+5rem)] z-50 ml-auto max-w-[360px] overflow-hidden rounded-2xl border border-[#cfd7d1] bg-[#fbfcf9]/97 text-[#1d2823] shadow-[0_24px_70px_-24px_rgba(15,39,31,.55)] backdrop-blur sm:absolute sm:inset-x-auto sm:right-0 sm:top-[calc(100%+0.75rem)] sm:w-[360px]"
+      >
+        <div className="border-b border-[#e0e5e0] bg-[#22332c] px-5 py-4 text-white">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex gap-3">
+              <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-lg bg-white/10 text-[#d9e9e1]">
+                {state === "ios-install-required" ? <DeviceMobile size={20} /> : <BellRinging size={20} weight="duotone" />}
+              </span>
               <div>
-                <p className="text-sm font-medium">此设备可以接收后台推送</p>
-                <p className="mt-1 text-xs leading-5 text-[#6f7a74]">
-                  页面关闭后仍可收到匿名提醒；锁屏上不会显示反馈正文。
-                </p>
+                <h2 className="text-sm font-semibold">{copy?.title ?? "新消息提醒"}</h2>
+                <p className="mt-1 text-[11px] leading-4 text-[#aebfb6]">Researvo Feedback Admin</p>
               </div>
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button disabled={busy} onClick={() => void sendTest()} size="sm" variant="outline">
-                <Flask size={15} />
-                {busy ? "请稍候…" : "发送测试"}
-              </Button>
-              <Button disabled={busy} onClick={() => void disable()} size="sm" variant="danger">
-                关闭提醒
-              </Button>
-            </div>
-          </>
-        )}
+            <button
+              aria-label="收起通知设置"
+              className="rounded-md p-1 text-[#b8c7bf] transition hover:bg-white/10 hover:text-white"
+              onClick={() => setExpanded(false)}
+              type="button"
+            >
+              <X size={16} />
+            </button>
+          </div>
+        </div>
 
-        {message ? (
-          <p className="mt-4 rounded-lg border border-[#dce2dd] bg-white px-3 py-2.5 text-xs leading-5 text-[#526059]" role="status">
-            {message}
-          </p>
-        ) : null}
-      </div>
-    </aside>
+        <div className="p-5">
+          {copy ? (
+            <div className="flex gap-3 text-sm leading-6 text-[#56635d]">
+              <WarningCircle className="mt-1 shrink-0 text-[#9c6b29]" size={18} weight="duotone" />
+              <p>{copy.body}</p>
+            </div>
+          ) : (
+            <>
+              <div className="flex items-start gap-3">
+                <CheckCircle className="mt-0.5 shrink-0 text-[#2c725f]" size={19} weight="fill" />
+                <div>
+                  <p className="text-sm font-medium">此设备可以接收后台推送</p>
+                  <p className="mt-1 text-xs leading-5 text-[#6f7a74]">
+                    页面关闭后仍可收到匿名提醒；锁屏上不会显示反馈正文。
+                  </p>
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-2">
+                <Button disabled={busy} onClick={() => void sendTest()} size="sm" variant="outline">
+                  <Flask size={15} />
+                  {busy ? "请稍候…" : "发送测试"}
+                </Button>
+                <Button disabled={busy} onClick={() => void disable()} size="sm" variant="danger">
+                  关闭提醒
+                </Button>
+              </div>
+            </>
+          )}
+
+          {message ? (
+            <p className="mt-4 rounded-lg border border-[#dce2dd] bg-white px-3 py-2.5 text-xs leading-5 text-[#526059]" role="status">
+              {message}
+            </p>
+          ) : null}
+        </div>
+      </aside>
+    </div>
   );
 }

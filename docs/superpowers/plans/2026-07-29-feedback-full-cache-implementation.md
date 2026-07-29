@@ -89,6 +89,7 @@ DB 成功后更新缓存。缓存同步失败时将缓存标记为未就绪。
 - 在 token 验证通过的 `GET /api/feedback/thread` 中记录查询。
 - 200 和业务 404 都计数。
 - 每 100 次通过 Prisma `increment` 原子持久化。
+- 每五小时对不足 100 次的低流量 pending 数据执行一次 best-effort flush。
 - 同一批次使用去重写入持久化新发现的 installId 哈希。
 - flush 失败恢复 pending。
 - 缓存状态 API 不访问数据库。

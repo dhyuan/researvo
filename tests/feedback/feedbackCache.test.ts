@@ -248,6 +248,33 @@ describe("feedbackCache", () => {
     });
   });
 
+  it("flushes a low-volume query batch when the five-hour timer fires", async () => {
+    feedbackMetricUpsert.mockResolvedValue({
+      key: "client_thread_cache_queries",
+      total: BigInt(1),
+      updatedAt: new Date("2026-07-29T05:00:00.000Z"),
+    });
+    const cache = await import("@/lib/feedback/feedbackCache");
+    await cache.ensureFeedbackCacheReady();
+    await cache.recordFeedbackClientCacheQuery(
+      "ChineseHandCopy",
+      "install_low_volume",
+    );
+
+    expect(feedbackMetricUpsert).not.toHaveBeenCalled();
+    await cache.flushFeedbackMetricsNow();
+
+    expect(feedbackMetricUpsert).toHaveBeenCalledTimes(1);
+    expect(feedbackQueryClientCreateMany).toHaveBeenCalledTimes(1);
+    expect(cache.getFeedbackCacheStatus()).toMatchObject({
+      clientQueryCount: 1,
+      persistedClientQueryCount: 1,
+      pendingClientQueryCount: 0,
+      uniqueClientCount: 1,
+      lastPersistedAt: "2026-07-29T05:00:00.000Z",
+    });
+  });
+
   it("restores pending queries after a failed flush", async () => {
     feedbackMetricUpsert.mockRejectedValue(new Error("write failed"));
     const cache = await import("@/lib/feedback/feedbackCache");

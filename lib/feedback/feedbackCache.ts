@@ -6,6 +6,7 @@ export const CLIENT_THREAD_CACHE_QUERY_METRIC_KEY =
   "client_thread_cache_queries";
 
 const CLIENT_QUERY_FLUSH_SIZE = 100;
+const METRICS_FLUSH_INTERVAL_MS = 5 * 60 * 60 * 1000;
 const GLOBAL_STATE_KEY = "__researvoFeedbackCacheState";
 
 export type FeedbackCacheApp = {
@@ -70,6 +71,7 @@ type FeedbackCacheState = {
     string,
     { sourceApp: string; installIdHash: string }
   >;
+  metricsFlushTimer: ReturnType<typeof setInterval> | null;
   revision: number;
 };
 
@@ -108,6 +110,7 @@ function createState(): FeedbackCacheState {
     flushingCount: 0,
     queriedClientKeys: new Set(),
     pendingQueriedClients: new Map(),
+    metricsFlushTimer: null,
     revision: 0,
   };
 }
@@ -238,6 +241,7 @@ async function loadInitialSnapshot() {
 
 export async function ensureFeedbackCacheReady() {
   const current = state();
+  ensureMetricsFlushTimer(current);
   if (current.snapshot) {
     return current.snapshot;
   }
@@ -456,9 +460,15 @@ export function markFeedbackCacheNotReady(reason: string, error?: unknown) {
   });
 }
 
-async function flushPendingClientQueries() {
+async function flushPendingClientQueries(force = false) {
   const current = state();
-  if (current.flushPromise || current.pendingCount < CLIENT_QUERY_FLUSH_SIZE) {
+  const hasPendingData =
+    current.pendingCount > 0 || current.pendingQueriedClients.size > 0;
+  if (
+    current.flushPromise ||
+    (!force && current.pendingCount < CLIENT_QUERY_FLUSH_SIZE) ||
+    (force && !hasPendingData)
+  ) {
     return current.flushPromise;
   }
 
@@ -469,18 +479,20 @@ async function flushPendingClientQueries() {
   current.flushingCount = batchSize;
   current.flushPromise = (async () => {
     try {
-      const metric = await prisma.feedbackMetric.upsert({
-        where: { key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY },
-        create: {
-          key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY,
-          total: BigInt(batchSize),
-        },
-        update: {
-          total: { increment: BigInt(batchSize) },
-        },
-      });
-      current.persistedTotal = metric.total;
-      current.lastPersistedAt = metric.updatedAt;
+      if (batchSize > 0) {
+        const metric = await prisma.feedbackMetric.upsert({
+          where: { key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY },
+          create: {
+            key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY,
+            total: BigInt(batchSize),
+          },
+          update: {
+            total: { increment: BigInt(batchSize) },
+          },
+        });
+        current.persistedTotal = metric.total;
+        current.lastPersistedAt = metric.updatedAt;
+      }
 
       if (queriedClients.length > 0) {
         try {
@@ -522,6 +534,21 @@ async function flushPendingClientQueries() {
   return current.flushPromise;
 }
 
+function ensureMetricsFlushTimer(current: FeedbackCacheState) {
+  if (current.metricsFlushTimer || process.env.NODE_ENV === "test") {
+    return;
+  }
+
+  current.metricsFlushTimer = setInterval(() => {
+    void flushPendingClientQueries(true);
+  }, METRICS_FLUSH_INTERVAL_MS);
+  current.metricsFlushTimer.unref?.();
+}
+
+export async function flushFeedbackMetricsNow() {
+  await flushPendingClientQueries(true);
+}
+
 export async function recordFeedbackClientCacheQuery(
   sourceApp: string,
   installId: string,
@@ -561,5 +588,9 @@ export function getFeedbackCacheStatus() {
 }
 
 export function resetFeedbackCacheForTests() {
+  const current = globalThis[GLOBAL_STATE_KEY];
+  if (current?.metricsFlushTimer) {
+    clearInterval(current.metricsFlushTimer);
+  }
   globalThis[GLOBAL_STATE_KEY] = createState();
 }

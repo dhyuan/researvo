@@ -40,7 +40,10 @@ export async function GET(request: Request) {
   }
 
   const thread = await getCurrentFeedbackThread(parsed.data);
-  await recordFeedbackClientCacheQuery();
+  await recordFeedbackClientCacheQuery(
+    parsed.data.sourceApp,
+    parsed.data.installId,
+  );
   if (!thread) {
     return json({ error: "FEEDBACK_NOT_FOUND" }, { status: 404 });
   }

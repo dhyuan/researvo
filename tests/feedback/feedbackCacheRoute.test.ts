@@ -28,6 +28,7 @@ describe("feedback cache admin APIs", () => {
       clientQueryCount: 137,
       persistedClientQueryCount: 100,
       pendingClientQueryCount: 37,
+      uniqueClientCount: 11,
       appCount: 1,
       threadCount: 4,
       messageCount: 9,
@@ -45,6 +46,7 @@ describe("feedback cache admin APIs", () => {
     await expect(response.json()).resolves.toMatchObject({
       status: "ready",
       clientQueryCount: 137,
+      uniqueClientCount: 11,
       threadCount: 4,
       messageCount: 9,
     });

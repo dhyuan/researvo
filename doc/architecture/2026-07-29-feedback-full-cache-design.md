@@ -64,6 +64,7 @@ FeedbackCacheSnapshot
 ├── threadsById
 ├── threadIdBySourceAppAndInstallId
 ├── messageToThreadId
+├── queriedClientKeys
 ├── loadedAt
 ├── threadCount
 └── messageCount
@@ -226,6 +227,27 @@ client_thread_cache_queries
 
 进程意外结束最多丢失 99 次，因此该统计是近似累计值。Admin UI 应使用“约”或“已累计”的表述，不宣传为审计级精确数据。
 
+### 不同查询客户端
+
+“不同客户端”定义为唯一的 `sourceApp + installId`，代表一个应用安装实例，不等同于自然人：
+
+- 同一用户的多台设备分别计数；
+- App 重装或本地数据被清除后可能产生新的 `installId`，会被视为新客户端。
+
+内存使用 Set 实时去重。数据库只保存 `installId` 的 SHA-256 哈希，不保存原始值：
+
+```prisma
+model FeedbackQueryClient {
+  sourceApp     String
+  installIdHash String
+  firstSeenAt   DateTime @default(now())
+
+  @@id([sourceApp, installIdHash])
+}
+```
+
+新发现的客户端随每 100 次查询的统计批次使用 `createMany(skipDuplicates: true)` 持久化。Admin 展示内存中已加载的历史客户端与当前未落库客户端的并集。
+
 ## Admin API
 
 ### 获取缓存状态
@@ -244,6 +266,7 @@ GET /api/admin/feedback/cache
   "clientQueryCount": 12337,
   "persistedClientQueryCount": 12300,
   "pendingClientQueryCount": 37,
+  "uniqueClientCount": 11,
   "appCount": 1,
   "threadCount": 82,
   "messageCount": 146,
@@ -288,6 +311,7 @@ POST /api/internal/feedback/cache/rebuild
 
 - 缓存状态；
 - 客户端缓存查询累计次数；
+- 不同查询客户端数量；
 - thread 数量；
 - message 数量；
 - 最近加载时间；

@@ -87,6 +87,7 @@ type FeedbackCacheStatus = {
   clientQueryCount: number;
   persistedClientQueryCount: number;
   pendingClientQueryCount: number;
+  uniqueClientCount: number;
   appCount: number;
   threadCount: number;
   messageCount: number;
@@ -684,6 +685,12 @@ export function FeedbackInboxClient() {
                           已累计客户端查询
                           <strong className="ml-1 font-mono font-semibold text-[#28352f]">
                             约 {cacheStatus.clientQueryCount.toLocaleString("zh-CN")} 次
+                          </strong>
+                        </span>
+                        <span>
+                          查询客户端
+                          <strong className="ml-1 font-mono font-semibold text-[#28352f]">
+                            {cacheStatus.uniqueClientCount.toLocaleString("zh-CN")}
                           </strong>
                         </span>
                         <span>

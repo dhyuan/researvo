@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const feedbackAppFindMany = vi.fn();
 const feedbackMetricFindUnique = vi.fn();
 const feedbackMetricUpsert = vi.fn();
+const feedbackQueryClientFindMany = vi.fn();
+const feedbackQueryClientCreateMany = vi.fn();
 
 vi.mock("@/lib/persistence/repositories", () => ({
   prisma: {
@@ -10,6 +12,10 @@ vi.mock("@/lib/persistence/repositories", () => ({
     feedbackMetric: {
       findUnique: feedbackMetricFindUnique,
       upsert: feedbackMetricUpsert,
+    },
+    feedbackQueryClient: {
+      findMany: feedbackQueryClientFindMany,
+      createMany: feedbackQueryClientCreateMany,
     },
   },
 }));
@@ -61,6 +67,8 @@ describe("feedbackCache", () => {
     resetFeedbackCacheForTests();
     feedbackAppFindMany.mockResolvedValue([app]);
     feedbackMetricFindUnique.mockResolvedValue(null);
+    feedbackQueryClientFindMany.mockResolvedValue([]);
+    feedbackQueryClientCreateMany.mockResolvedValue({ count: 0 });
   });
 
   it("single-flights initialization and builds all indexes", async () => {
@@ -176,7 +184,10 @@ describe("feedbackCache", () => {
     await cache.ensureFeedbackCacheReady();
 
     for (let index = 0; index < 100; index += 1) {
-      await cache.recordFeedbackClientCacheQuery();
+      await cache.recordFeedbackClientCacheQuery(
+        "ChineseHandCopy",
+        index % 2 === 0 ? "install_1" : "install_2",
+      );
     }
 
     expect(feedbackMetricUpsert).toHaveBeenCalledTimes(1);
@@ -188,10 +199,52 @@ describe("feedbackCache", () => {
       },
       update: { total: { increment: BigInt(100) } },
     });
+    expect(feedbackQueryClientCreateMany).toHaveBeenCalledTimes(1);
+    const persistedClients = feedbackQueryClientCreateMany.mock.calls[0]?.[0]
+      .data as Array<{ sourceApp: string; installIdHash: string }>;
+    expect(persistedClients).toHaveLength(2);
+    expect(persistedClients.every((client) => client.sourceApp === "ChineseHandCopy")).toBe(
+      true,
+    );
+    expect(
+      persistedClients.every(
+        (client) =>
+          client.installIdHash !== "install_1" &&
+          client.installIdHash !== "install_2" &&
+          client.installIdHash.length === 64,
+      ),
+    ).toBe(true);
     expect(cache.getFeedbackCacheStatus()).toMatchObject({
       clientQueryCount: 100,
       persistedClientQueryCount: 100,
       pendingClientQueryCount: 0,
+      uniqueClientCount: 2,
+    });
+  });
+
+  it("loads persisted unique clients and counts new installs only once", async () => {
+    feedbackQueryClientFindMany.mockResolvedValue([
+      {
+        sourceApp: "ChineseHandCopy",
+        installIdHash:
+          "07ad118d6cc8642c031da5b0919b34d0f70592ce1ba9b2ecbdac4eb037e99f4f",
+      },
+    ]);
+    const cache = await import("@/lib/feedback/feedbackCache");
+    await cache.ensureFeedbackCacheReady();
+
+    await cache.recordFeedbackClientCacheQuery(
+      "ChineseHandCopy",
+      "install_new",
+    );
+    await cache.recordFeedbackClientCacheQuery(
+      "ChineseHandCopy",
+      "install_new",
+    );
+
+    expect(cache.getFeedbackCacheStatus()).toMatchObject({
+      clientQueryCount: 2,
+      uniqueClientCount: 2,
     });
   });
 
@@ -201,7 +254,10 @@ describe("feedbackCache", () => {
     await cache.ensureFeedbackCacheReady();
 
     for (let index = 0; index < 100; index += 1) {
-      await cache.recordFeedbackClientCacheQuery();
+      await cache.recordFeedbackClientCacheQuery(
+        "ChineseHandCopy",
+        "install_1",
+      );
     }
 
     expect(cache.getFeedbackCacheStatus()).toMatchObject({

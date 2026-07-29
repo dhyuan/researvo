@@ -8,6 +8,8 @@ describe("feedback admin cache controls", () => {
     expect(source).toContain('fetch("/api/admin/feedback/cache", { cache: "no-store" })');
     expect(source).toContain('aria-label="反馈缓存状态"');
     expect(source).toContain("已累计客户端查询");
+    expect(source).toContain("查询客户端");
+    expect(source).toContain("cacheStatus.uniqueClientCount");
     expect(source).toContain("cacheStatus.threadCount");
     expect(source).toContain("cacheStatus.messageCount");
     expect(source).toContain("cacheStatus.loadedAt");

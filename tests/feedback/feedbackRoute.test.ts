@@ -448,7 +448,10 @@ describe("feedback route", () => {
       sourceApp: "ChineseHandCopy",
       installId: "install_19a",
     });
-    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledTimes(1);
+    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledWith(
+      "ChineseHandCopy",
+      "install_19a",
+    );
   });
 
   it("returns 404 when the current install has no feedback conversation", async () => {
@@ -463,7 +466,10 @@ describe("feedback route", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "FEEDBACK_NOT_FOUND" });
     expect(response.status).toBe(404);
-    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledTimes(1);
+    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledWith(
+      "ChineseHandCopy",
+      "install_missing",
+    );
   });
 
   it("returns 401 and does not count a current-thread query with an invalid token", async () => {

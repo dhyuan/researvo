@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const feedbackAppFindMany = vi.fn();
 const feedbackMetricFindUnique = vi.fn();
 const feedbackMetricUpsert = vi.fn();
+const feedbackQueryClientFindMany = vi.fn();
+const feedbackQueryClientCreateMany = vi.fn();
 const feedbackThreadFindUnique = vi.fn();
 const feedbackThreadUpdate = vi.fn();
 const feedbackThreadUpdateMany = vi.fn();
@@ -22,6 +24,10 @@ vi.mock("@/lib/persistence/repositories", () => ({
     feedbackMetric: {
       findUnique: feedbackMetricFindUnique,
       upsert: feedbackMetricUpsert,
+    },
+    feedbackQueryClient: {
+      findMany: feedbackQueryClientFindMany,
+      createMany: feedbackQueryClientCreateMany,
     },
     feedbackThread: {
       findUnique: feedbackThreadFindUnique,
@@ -117,6 +123,8 @@ describe("feedbackService with full cache", () => {
     );
     resetFeedbackCacheForTests();
     loadWith();
+    feedbackQueryClientFindMany.mockResolvedValue([]);
+    feedbackQueryClientCreateMany.mockResolvedValue({ count: 0 });
     transaction.mockImplementation(async (callback) =>
       callback(transactionClient()),
     );

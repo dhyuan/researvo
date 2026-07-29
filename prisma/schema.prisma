@@ -167,6 +167,15 @@ model FeedbackMetric {
   @@map("feedback_metrics")
 }
 
+model FeedbackQueryClient {
+  sourceApp     String
+  installIdHash String
+  firstSeenAt   DateTime @default(now())
+
+  @@id([sourceApp, installIdHash])
+  @@map("feedback_query_clients")
+}
+
 model AdminPushSubscription {
   id               String                 @id @default(cuid())
   endpoint         String                 @db.Text

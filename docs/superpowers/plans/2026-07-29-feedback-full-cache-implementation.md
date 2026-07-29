@@ -22,6 +22,7 @@
 - 在 `prisma/schema.prisma` 添加 `FeedbackMetric`。
 - 新增 migration 创建统计表。
 - 固定统计 key 为 `client_thread_cache_queries`。
+- 新增 `FeedbackQueryClient`，只保存 `sourceApp + installIdHash`，用于跨重启恢复不同查询客户端数量。
 
 ### 2. 全量缓存模块
 
@@ -88,6 +89,7 @@ DB 成功后更新缓存。缓存同步失败时将缓存标记为未就绪。
 - 在 token 验证通过的 `GET /api/feedback/thread` 中记录查询。
 - 200 和业务 404 都计数。
 - 每 100 次通过 Prisma `increment` 原子持久化。
+- 同一批次使用去重写入持久化新发现的 installId 哈希。
 - flush 失败恢复 pending。
 - 缓存状态 API 不访问数据库。
 
@@ -112,6 +114,7 @@ DB 成功后更新缓存。缓存同步失败时将缓存标记为未就绪。
 - 每条写路径同步缓存；
 - IP location 同步；
 - 每 100 次持久化；
+- 不同 installId 实时去重及跨重启恢复；
 - flush 失败恢复 pending；
 - 重建成功原子替换；
 - 重建失败保留旧快照；
@@ -182,6 +185,6 @@ app/api/internal/feedback/cache/rebuild/route.ts
 components/feedback-admin/FeedbackInboxClient.tsx
 prisma/schema.prisma
 prisma/migrations/<timestamp>_feedback_cache_metrics/migration.sql
+prisma/migrations/<timestamp>_feedback_unique_query_clients/migration.sql
 tests/feedback/*
 ```
-

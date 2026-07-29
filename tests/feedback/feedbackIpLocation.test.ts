@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const feedbackAppFindMany = vi.fn();
 const feedbackMetricFindUnique = vi.fn();
 const feedbackMessageUpdateMany = vi.fn();
+const feedbackQueryClientFindMany = vi.fn();
 
 vi.mock("@/lib/persistence/repositories", () => ({
   prisma: {
     feedbackApp: { findMany: feedbackAppFindMany },
     feedbackMetric: { findUnique: feedbackMetricFindUnique },
+    feedbackQueryClient: { findMany: feedbackQueryClientFindMany },
     feedbackMessage: { updateMany: feedbackMessageUpdateMany },
   },
 }));
@@ -21,6 +23,7 @@ describe("feedback IP location cache synchronization", () => {
     );
     resetFeedbackCacheForTests();
     feedbackMetricFindUnique.mockResolvedValue(null);
+    feedbackQueryClientFindMany.mockResolvedValue([]);
     feedbackMessageUpdateMany.mockResolvedValue({ count: 1 });
     feedbackAppFindMany.mockResolvedValue([
       {

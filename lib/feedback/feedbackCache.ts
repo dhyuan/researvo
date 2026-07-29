@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { prisma } from "@/lib/persistence/repositories";
 
 export const CLIENT_THREAD_CACHE_QUERY_METRIC_KEY =
@@ -63,6 +65,11 @@ type FeedbackCacheState = {
   lastPersistedAt: Date | null;
   flushPromise: Promise<void> | null;
   flushingCount: number;
+  queriedClientKeys: Set<string>;
+  pendingQueriedClients: Map<
+    string,
+    { sourceApp: string; installIdHash: string }
+  >;
   revision: number;
 };
 
@@ -99,6 +106,8 @@ function createState(): FeedbackCacheState {
     lastPersistedAt: null,
     flushPromise: null,
     flushingCount: 0,
+    queriedClientKeys: new Set(),
+    pendingQueriedClients: new Map(),
     revision: 0,
   };
 }
@@ -113,6 +122,14 @@ function state() {
 
 function installKey(sourceApp: string, installId: string) {
   return `${sourceApp}\u0000${installId}`;
+}
+
+function queriedClientKey(sourceApp: string, installIdHash: string) {
+  return `${sourceApp}\u0000${installIdHash}`;
+}
+
+function hashInstallId(installId: string) {
+  return createHash("sha256").update(installId).digest("hex");
 }
 
 function cloneMessage(message: FeedbackCacheMessage): FeedbackCacheMessage {
@@ -184,10 +201,16 @@ async function loadApps() {
 async function loadInitialSnapshot() {
   const current = state();
   const revision = current.revision;
-  const [apps, metric] = await Promise.all([
+  const [apps, metric, queriedClients] = await Promise.all([
     loadApps(),
     prisma.feedbackMetric.findUnique({
       where: { key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY },
+    }),
+    prisma.feedbackQueryClient.findMany({
+      select: {
+        sourceApp: true,
+        installIdHash: true,
+      },
     }),
   ]);
   const snapshot = buildSnapshot(apps);
@@ -199,6 +222,11 @@ async function loadInitialSnapshot() {
   current.snapshot = snapshot;
   current.persistedTotal = metric?.total ?? BigInt(0);
   current.lastPersistedAt = metric?.updatedAt ?? null;
+  for (const client of queriedClients) {
+    current.queriedClientKeys.add(
+      queriedClientKey(client.sourceApp, client.installIdHash),
+    );
+  }
   current.status = "ready";
   console.info("Feedback cache initialized", {
     appCount: snapshot.appCount,
@@ -240,13 +268,21 @@ export async function rebuildFeedbackCache(): Promise<FeedbackCacheRebuildResult
   const revision = current.revision;
   current.rebuildPromise = (async () => {
     const shouldLoadMetric = !current.snapshot;
-    const [apps, metric] = await Promise.all([
+    const [apps, metric, queriedClients] = await Promise.all([
       loadApps(),
       shouldLoadMetric
         ? prisma.feedbackMetric.findUnique({
             where: { key: CLIENT_THREAD_CACHE_QUERY_METRIC_KEY },
           })
         : Promise.resolve(null),
+      shouldLoadMetric
+        ? prisma.feedbackQueryClient.findMany({
+            select: {
+              sourceApp: true,
+              installIdHash: true,
+            },
+          })
+        : Promise.resolve([]),
     ]);
     const snapshot = buildSnapshot(apps);
 
@@ -258,6 +294,11 @@ export async function rebuildFeedbackCache(): Promise<FeedbackCacheRebuildResult
     if (metric) {
       current.persistedTotal = metric.total;
       current.lastPersistedAt = metric.updatedAt;
+    }
+    for (const client of queriedClients) {
+      current.queriedClientKeys.add(
+        queriedClientKey(client.sourceApp, client.installIdHash),
+      );
     }
     current.status = "ready";
     const result: FeedbackCacheRebuildResult = {
@@ -422,7 +463,9 @@ async function flushPendingClientQueries() {
   }
 
   const batchSize = current.pendingCount;
+  const queriedClients = Array.from(current.pendingQueriedClients.values());
   current.pendingCount = 0;
+  current.pendingQueriedClients.clear();
   current.flushingCount = batchSize;
   current.flushPromise = (async () => {
     try {
@@ -438,8 +481,34 @@ async function flushPendingClientQueries() {
       });
       current.persistedTotal = metric.total;
       current.lastPersistedAt = metric.updatedAt;
+
+      if (queriedClients.length > 0) {
+        try {
+          await prisma.feedbackQueryClient.createMany({
+            data: queriedClients,
+            skipDuplicates: true,
+          });
+        } catch (error) {
+          for (const client of queriedClients) {
+            current.pendingQueriedClients.set(
+              queriedClientKey(client.sourceApp, client.installIdHash),
+              client,
+            );
+          }
+          console.error("Failed to persist unique feedback query clients", {
+            clientCount: queriedClients.length,
+            error: error instanceof Error ? error.message : undefined,
+          });
+        }
+      }
     } catch (error) {
       current.pendingCount += batchSize;
+      for (const client of queriedClients) {
+        current.pendingQueriedClients.set(
+          queriedClientKey(client.sourceApp, client.installIdHash),
+          client,
+        );
+      }
       console.error("Failed to persist feedback cache query count", {
         batchSize,
         error: error instanceof Error ? error.message : undefined,
@@ -453,8 +522,20 @@ async function flushPendingClientQueries() {
   return current.flushPromise;
 }
 
-export async function recordFeedbackClientCacheQuery() {
+export async function recordFeedbackClientCacheQuery(
+  sourceApp: string,
+  installId: string,
+) {
   const current = state();
+  const installIdHash = hashInstallId(installId);
+  const clientKey = queriedClientKey(sourceApp, installIdHash);
+  if (!current.queriedClientKeys.has(clientKey)) {
+    current.queriedClientKeys.add(clientKey);
+    current.pendingQueriedClients.set(clientKey, {
+      sourceApp,
+      installIdHash,
+    });
+  }
   current.pendingCount += 1;
   await flushPendingClientQueries();
 }
@@ -469,6 +550,7 @@ export function getFeedbackCacheStatus() {
       persistedClientQueryCount + current.pendingCount + current.flushingCount,
     persistedClientQueryCount,
     pendingClientQueryCount: current.pendingCount,
+    uniqueClientCount: current.queriedClientKeys.size,
     appCount: snapshot?.appCount ?? 0,
     threadCount: snapshot?.threadCount ?? 0,
     messageCount: snapshot?.messageCount ?? 0,

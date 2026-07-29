@@ -13,9 +13,19 @@ const updateAdminFeedbackMessage = vi.fn();
 const updateFeedbackStatusAsAdmin = vi.fn();
 const submitFeedback = vi.fn();
 const scheduleFeedbackIpLocation = vi.fn();
+const findAuthorizedApp = vi.fn();
+const recordFeedbackClientCacheQuery = vi.fn();
 
 vi.mock("@/lib/feedback/ipLocationScheduler", () => ({
   scheduleFeedbackIpLocation,
+}));
+
+vi.mock("@/lib/feedback/adminAuth", () => ({
+  isFeedbackAdminAuthorized: () => true,
+}));
+
+vi.mock("@/lib/feedback/feedbackCache", () => ({
+  recordFeedbackClientCacheQuery,
 }));
 
 vi.mock("@/lib/feedback/feedbackService", () => ({
@@ -31,6 +41,7 @@ vi.mock("@/lib/feedback/feedbackService", () => ({
   submitFeedback,
   updateAdminFeedbackMessage,
   updateFeedbackStatusAsAdmin,
+  findAuthorizedApp,
 }));
 
 const makeRequest = (body: unknown, headers?: HeadersInit) =>
@@ -55,6 +66,10 @@ describe("feedback route", () => {
     updateFeedbackStatusAsAdmin.mockReset();
     submitFeedback.mockReset();
     scheduleFeedbackIpLocation.mockReset();
+    findAuthorizedApp.mockReset();
+    findAuthorizedApp.mockResolvedValue({ id: "app_1" });
+    recordFeedbackClientCacheQuery.mockReset();
+    recordFeedbackClientCacheQuery.mockResolvedValue(undefined);
   });
 
   it("stores feedback when the app token matches", async () => {
@@ -433,6 +448,7 @@ describe("feedback route", () => {
       sourceApp: "ChineseHandCopy",
       installId: "install_19a",
     });
+    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledTimes(1);
   });
 
   it("returns 404 when the current install has no feedback conversation", async () => {
@@ -447,6 +463,25 @@ describe("feedback route", () => {
 
     await expect(response.json()).resolves.toEqual({ error: "FEEDBACK_NOT_FOUND" });
     expect(response.status).toBe(404);
+    expect(recordFeedbackClientCacheQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns 401 and does not count a current-thread query with an invalid token", async () => {
+    findAuthorizedApp.mockResolvedValueOnce(null);
+    const { GET } = await import("@/app/api/feedback/thread/route");
+
+    const response = await GET(
+      new Request(
+        "http://localhost/api/feedback/thread?token=wrong-token&sourceApp=ChineseHandCopy&installId=install_19a",
+      ),
+    );
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({
+      error: "INVALID_FEEDBACK_TOKEN",
+    });
+    expect(getCurrentFeedbackThread).not.toHaveBeenCalled();
+    expect(recordFeedbackClientCacheQuery).not.toHaveBeenCalled();
   });
 
   it("sends a user message to the current feedback conversation", async () => {

@@ -82,6 +82,28 @@ type InboxResponse = {
   hasMore: boolean;
 };
 
+type FeedbackCacheStatus = {
+  status: "empty" | "loading" | "ready";
+  clientQueryCount: number;
+  persistedClientQueryCount: number;
+  pendingClientQueryCount: number;
+  appCount: number;
+  threadCount: number;
+  messageCount: number;
+  loadedAt: string | null;
+  lastPersistedAt: string | null;
+  rebuilding: boolean;
+};
+
+type FeedbackCacheRebuildResponse = {
+  ok: true;
+  appCount: number;
+  threadCount: number;
+  messageCount: number;
+  durationMs: number;
+  rebuiltAt: string;
+};
+
 const statusLabels: Record<FeedbackStatus, string> = {
   open: "待处理",
   replied: "已回复",
@@ -167,6 +189,10 @@ export function FeedbackInboxClient() {
   const [loadingList, setLoadingList] = useState(true);
   const [loadingDetail, setLoadingDetail] = useState(false);
   const [listError, setListError] = useState<string | null>(null);
+  const [cacheStatus, setCacheStatus] = useState<FeedbackCacheStatus | null>(null);
+  const [loadingCacheStatus, setLoadingCacheStatus] = useState(true);
+  const [cacheStatusError, setCacheStatusError] = useState<string | null>(null);
+  const [rebuildingCache, setRebuildingCache] = useState(false);
   const [reply, setReply] = useState("");
   const [sending, setSending] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
@@ -177,6 +203,7 @@ export function FeedbackInboxClient() {
   const [mobileDetail, setMobileDetail] = useState(() => Boolean(getDeepLinkedThread()));
   const inboxRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
   const detailRequestRef = useRef<{ controller: AbortController; sequence: number } | null>(null);
+  const initialCacheStatusLoadedRef = useRef(false);
   const inboxSequenceRef = useRef(0);
   const detailSequenceRef = useRef(0);
 
@@ -300,15 +327,45 @@ export function FeedbackInboxClient() {
     void loadDetail();
   }, [loadDetail]);
 
+  const loadCacheStatus = useCallback(async () => {
+    if (!authorized) return;
+    setLoadingCacheStatus(true);
+    setCacheStatusError(null);
+
+    try {
+      const response = await fetch("/api/admin/feedback/cache", { cache: "no-store" });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      if (!response.ok) throw new Error("CACHE_STATUS_FAILED");
+
+      const data = (await response.json()) as FeedbackCacheStatus;
+      setCacheStatus(data);
+    } catch {
+      setCacheStatusError("缓存状态暂时无法读取。");
+    } finally {
+      setLoadingCacheStatus(false);
+    }
+  }, [authorized, redirectToLogin]);
+
+  useEffect(() => {
+    if (!authorized || loadingList || initialCacheStatusLoadedRef.current) return;
+    initialCacheStatusLoadedRef.current = true;
+    // The first inbox read initializes the full cache; read its status after
+    // that request settles so the initial status does not race and show empty.
+    void loadCacheStatus();
+  }, [authorized, loadingList, loadCacheStatus]);
+
   const refreshVisibleInbox = useCallback(() => {
     if (!authorized || document.visibilityState !== "visible") return;
-    void Promise.all([loadInbox(), loadDetail()]);
-  }, [authorized, loadDetail, loadInbox]);
+    void Promise.all([loadInbox(), loadDetail(), loadCacheStatus()]);
+  }, [authorized, loadCacheStatus, loadDetail, loadInbox]);
 
   const refreshInbox = useCallback(() => {
     if (!authorized) return;
-    void Promise.all([loadInbox(), loadDetail()]);
-  }, [authorized, loadDetail, loadInbox]);
+    void Promise.all([loadInbox(), loadDetail(), loadCacheStatus()]);
+  }, [authorized, loadCacheStatus, loadDetail, loadInbox]);
 
   useEffect(() => {
     if (!authorized) return;
@@ -464,6 +521,36 @@ export function FeedbackInboxClient() {
     }
   }
 
+  async function rebuildCache() {
+    if (rebuildingCache) return;
+    const confirmed = window.confirm(
+      "确认从数据库重新加载全部反馈缓存？加载成功前，当前缓存会继续提供服务。",
+    );
+    if (!confirmed) return;
+
+    setRebuildingCache(true);
+    try {
+      const response = await fetch("/api/internal/feedback/cache/rebuild", {
+        method: "POST",
+      });
+      if (response.status === 401) {
+        redirectToLogin();
+        return;
+      }
+      if (!response.ok) throw new Error("CACHE_REBUILD_FAILED");
+
+      const result = (await response.json()) as FeedbackCacheRebuildResponse;
+      await Promise.all([loadCacheStatus(), loadInbox(), loadDetail()]);
+      toast.success(
+        `缓存重建完成：${result.threadCount} 个会话、${result.messageCount} 条消息，用时 ${result.durationMs}ms。`,
+      );
+    } catch {
+      toast.error("缓存重建失败，当前缓存和页面数据已保留。");
+    } finally {
+      setRebuildingCache(false);
+    }
+  }
+
   async function logout() {
     try {
       if ("serviceWorker" in navigator && "PushManager" in window) {
@@ -560,6 +647,84 @@ export function FeedbackInboxClient() {
           </header>
 
           <div className="mx-auto max-w-[1540px] px-3 py-3 sm:px-5 sm:py-5 lg:px-7">
+            <section
+              aria-label="反馈缓存状态"
+              className="mb-3 rounded-xl border border-[#d8ddd8] bg-white px-4 py-3 shadow-[0_14px_32px_-30px_rgba(21,46,38,.45)] sm:px-5"
+            >
+              {loadingCacheStatus && !cacheStatus ? (
+                <div className="flex items-center gap-3" aria-label="正在读取缓存状态">
+                  <Skeleton className="h-4 w-20" />
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-4 w-24" />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-[#68736d]">
+                    <span className="inline-flex items-center gap-2 font-medium text-[#334139]">
+                      <span
+                        className={cn(
+                          "size-2 rounded-full",
+                          cacheStatus?.status === "ready" && !cacheStatus.rebuilding
+                            ? "bg-[#38866f]"
+                            : "bg-[#bd7e27]",
+                        )}
+                      />
+                      缓存
+                      {cacheStatus?.rebuilding
+                        ? "重建中"
+                        : cacheStatus?.status === "ready"
+                          ? "正常"
+                          : cacheStatus?.status === "loading"
+                            ? "加载中"
+                            : "未初始化"}
+                    </span>
+                    {cacheStatus ? (
+                      <>
+                        <span>
+                          已累计客户端查询
+                          <strong className="ml-1 font-mono font-semibold text-[#28352f]">
+                            约 {cacheStatus.clientQueryCount.toLocaleString("zh-CN")} 次
+                          </strong>
+                        </span>
+                        <span>
+                          会话
+                          <strong className="ml-1 font-mono font-semibold text-[#28352f]">
+                            {cacheStatus.threadCount.toLocaleString("zh-CN")}
+                          </strong>
+                        </span>
+                        <span>
+                          消息
+                          <strong className="ml-1 font-mono font-semibold text-[#28352f]">
+                            {cacheStatus.messageCount.toLocaleString("zh-CN")}
+                          </strong>
+                        </span>
+                        <span>最近加载 {cacheStatus.loadedAt ? relativeTime(cacheStatus.loadedAt) : "尚未"}</span>
+                        <span>
+                          最近统计持久化{" "}
+                          {cacheStatus.lastPersistedAt ? relativeTime(cacheStatus.lastPersistedAt) : "尚未"}
+                        </span>
+                      </>
+                    ) : null}
+                    {cacheStatusError ? (
+                      <span className="font-medium text-[#923d37]" role="status">
+                        {cacheStatusError}
+                      </span>
+                    ) : null}
+                  </div>
+                  <Button
+                    className="self-start xl:self-auto"
+                    disabled={rebuildingCache || cacheStatus?.rebuilding}
+                    onClick={() => void rebuildCache()}
+                    size="sm"
+                    variant="outline"
+                  >
+                    <ArrowClockwise className={cn(rebuildingCache && "animate-spin")} size={15} />
+                    {rebuildingCache ? "正在重新加载…" : "重新加载全部缓存"}
+                  </Button>
+                </div>
+              )}
+            </section>
+
             <div className="mb-3 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
               <div className="flex gap-1 overflow-x-auto rounded-lg border border-[#d7ddd7] bg-white p-1">
                 {([

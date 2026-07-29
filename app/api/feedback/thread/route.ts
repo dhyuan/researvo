@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
-import { getCurrentFeedbackThread } from "@/lib/feedback/feedbackService";
+import { recordFeedbackClientCacheQuery } from "@/lib/feedback/feedbackCache";
+import {
+  findAuthorizedApp,
+  getCurrentFeedbackThread,
+} from "@/lib/feedback/feedbackService";
 
 const jsonHeaders = {
   "Content-Type": "application/json; charset=utf-8",
@@ -30,8 +34,13 @@ export async function GET(request: Request) {
     return json({ error: "INVALID_FEEDBACK_REQUEST" }, { status: 400 });
   }
 
-  const thread = await getCurrentFeedbackThread(parsed.data);
+  const app = await findAuthorizedApp(parsed.data.sourceApp, parsed.data.token);
+  if (!app) {
+    return json({ error: "INVALID_FEEDBACK_TOKEN" }, { status: 401 });
+  }
 
+  const thread = await getCurrentFeedbackThread(parsed.data);
+  await recordFeedbackClientCacheQuery();
   if (!thread) {
     return json({ error: "FEEDBACK_NOT_FOUND" }, { status: 404 });
   }

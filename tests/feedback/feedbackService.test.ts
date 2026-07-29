@@ -1,428 +1,301 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockFeedbackAppFindUnique = vi.fn();
-const mockFeedbackThreadCreate = vi.fn();
-const mockFeedbackThreadFindFirst = vi.fn();
-const mockFeedbackThreadFindMany = vi.fn();
-const mockFeedbackThreadFindUnique = vi.fn();
-const mockFeedbackThreadCount = vi.fn();
-const mockFeedbackThreadUpdate = vi.fn();
-const mockFeedbackThreadUpdateMany = vi.fn();
-const mockFeedbackThreadUpsert = vi.fn();
-const mockFeedbackThreadDeleteMany = vi.fn();
-const mockFeedbackMessageCreate = vi.fn();
-const mockFeedbackMessageUpdateMany = vi.fn();
-const mockFeedbackPushEventUpsert = vi.fn();
-const mockTransaction = vi.fn();
+const feedbackAppFindMany = vi.fn();
+const feedbackMetricFindUnique = vi.fn();
+const feedbackMetricUpsert = vi.fn();
+const feedbackThreadFindUnique = vi.fn();
+const feedbackThreadUpdate = vi.fn();
+const feedbackThreadUpdateMany = vi.fn();
+const feedbackThreadUpsert = vi.fn();
+const feedbackThreadDeleteMany = vi.fn();
+const feedbackMessageCreate = vi.fn();
+const feedbackMessageUpdateMany = vi.fn();
+const feedbackPushEventUpsert = vi.fn();
+const transaction = vi.fn();
+const enqueueFeedbackPushEvent = vi.fn();
+const triggerPushDispatch = vi.fn();
 
 vi.mock("@/lib/persistence/repositories", () => ({
   prisma: {
-    $transaction: mockTransaction,
-    feedbackApp: {
-      findUnique: mockFeedbackAppFindUnique,
+    $transaction: transaction,
+    feedbackApp: { findMany: feedbackAppFindMany },
+    feedbackMetric: {
+      findUnique: feedbackMetricFindUnique,
+      upsert: feedbackMetricUpsert,
     },
     feedbackThread: {
-      create: mockFeedbackThreadCreate,
-      findFirst: mockFeedbackThreadFindFirst,
-      findMany: mockFeedbackThreadFindMany,
-      findUnique: mockFeedbackThreadFindUnique,
-      count: mockFeedbackThreadCount,
-      update: mockFeedbackThreadUpdate,
-      updateMany: mockFeedbackThreadUpdateMany,
-      upsert: mockFeedbackThreadUpsert,
-      deleteMany: mockFeedbackThreadDeleteMany,
+      findUnique: feedbackThreadFindUnique,
+      update: feedbackThreadUpdate,
+      updateMany: feedbackThreadUpdateMany,
+      upsert: feedbackThreadUpsert,
+      deleteMany: feedbackThreadDeleteMany,
     },
     feedbackMessage: {
-      create: mockFeedbackMessageCreate,
-      updateMany: mockFeedbackMessageUpdateMany,
+      create: feedbackMessageCreate,
+      updateMany: feedbackMessageUpdateMany,
     },
-    feedbackPushEvent: {
-      upsert: mockFeedbackPushEventUpsert,
-    },
+    feedbackPushEvent: { upsert: feedbackPushEventUpsert },
   },
+}));
+
+vi.mock("@/lib/push/pushOutbox", () => ({
+  enqueueFeedbackPushEvent,
+  triggerPushDispatch,
 }));
 
 const app = {
   id: "app_1",
   sourceApp: "ChineseHandCopy",
   token: "valid-token",
+  createdAt: new Date("2026-06-20T00:00:00.000Z"),
+  updatedAt: new Date("2026-06-20T00:00:00.000Z"),
 };
 
-describe("feedbackService", () => {
-  afterEach(() => {
-    delete process.env.ADMIN_WEB_PUSH_ENABLED;
-    vi.resetModules();
+const userMessage = {
+  id: "msg_user",
+  feedbackId: "fb_123",
+  senderType: "user",
+  body: "希望能支持横版纸张",
+  appVersion: "2.1.4",
+  ipAddress: "203.0.113.42",
+  ipLocation: null,
+  createdAt: new Date("2026-06-24T10:00:00.000Z"),
+};
+
+const adminMessage = {
+  id: "msg_admin",
+  feedbackId: "fb_123",
+  senderType: "admin",
+  body: "已经收到建议",
+  appVersion: null,
+  ipAddress: null,
+  ipLocation: null,
+  createdAt: new Date("2026-06-24T11:00:00.000Z"),
+};
+
+const thread = {
+  id: "fb_123",
+  feedbackAppId: "app_1",
+  sourceApp: "ChineseHandCopy",
+  channel: "google_play",
+  installId: "install_19a",
+  device: "iPhone 15 Pro",
+  appVersion: "2.1.4",
+  message: "希望能支持横版纸张",
+  status: "replied",
+  userLastReadAt: null,
+  lastAdminReplyAt: new Date("2026-06-24T11:00:00.000Z"),
+  createdAt: new Date("2026-06-24T10:00:00.000Z"),
+  updatedAt: new Date("2026-06-24T11:00:00.000Z"),
+  messages: [userMessage, adminMessage],
+};
+
+function loadWith(threads = [thread]) {
+  feedbackAppFindMany.mockResolvedValue([{ ...app, threads }]);
+  feedbackMetricFindUnique.mockResolvedValue(null);
+}
+
+function transactionClient() {
+  return {
+    feedbackThread: {
+      findUnique: feedbackThreadFindUnique,
+      update: feedbackThreadUpdate,
+      upsert: feedbackThreadUpsert,
+    },
+    feedbackMessage: {
+      create: feedbackMessageCreate,
+    },
+  };
+}
+
+describe("feedbackService with full cache", () => {
+  beforeEach(async () => {
     vi.clearAllMocks();
+    vi.resetModules();
+    const { resetFeedbackCacheForTests } = await import(
+      "@/lib/feedback/feedbackCache"
+    );
+    resetFeedbackCacheForTests();
+    loadWith();
+    transaction.mockImplementation(async (callback) =>
+      callback(transactionClient()),
+    );
   });
 
-  it("creates a feedback thread and initial user message", async () => {
-    process.env.ADMIN_WEB_PUSH_ENABLED = "true";
-    mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadUpsert.mockResolvedValue({ id: "fb_123" });
-    mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_123" });
-    mockFeedbackPushEventUpsert.mockResolvedValue({ id: "push_123" });
-    mockTransaction.mockImplementation(async (callback) =>
-      callback({
-        feedbackThread: {
-          upsert: mockFeedbackThreadUpsert,
-        },
-        feedbackMessage: {
-          create: mockFeedbackMessageCreate,
-        },
-        feedbackPushEvent: {
-          upsert: mockFeedbackPushEventUpsert,
-        },
-      }),
+  afterEach(async () => {
+    const { resetFeedbackCacheForTests } = await import(
+      "@/lib/feedback/feedbackCache"
     );
-    const { submitFeedback } = await import("@/lib/feedback/feedbackService");
+    resetFeedbackCacheForTests();
+  });
+
+  it("serves client and admin reads from one snapshot without per-key Prisma reads", async () => {
+    const service = await import("@/lib/feedback/feedbackService");
 
     await expect(
-      submitFeedback({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        channel: "google_play",
-        device: "iPhone 15 Pro",
-        installId: "install_19a",
-        appVersion: "硬笔临帖 v2.1.4",
-        ipAddress: "203.0.113.42",
-        message: "希望能支持横版纸张",
+      service.getCurrentFeedbackThread({
+        sourceApp: app.sourceApp,
+        token: app.token,
+        installId: thread.installId,
       }),
-    ).resolves.toEqual({ id: "fb_123", userMessageId: "msg_123" });
+    ).resolves.toMatchObject({
+      id: thread.id,
+      unreadAdminReplyCount: 1,
+    });
+    await expect(
+      service.getCurrentFeedbackThread({
+        sourceApp: app.sourceApp,
+        token: app.token,
+        installId: "install_missing",
+      }),
+    ).resolves.toBeNull();
+    await expect(service.getFeedbackThreadForAdmin(thread.id)).resolves.toMatchObject({
+      id: thread.id,
+      messages: [{ id: userMessage.id }, { id: adminMessage.id }],
+    });
 
-    expect(mockFeedbackThreadUpsert).toHaveBeenCalledWith({
-      where: {
-        sourceApp_installId: {
-          sourceApp: "ChineseHandCopy",
-          installId: "install_19a",
-        },
-      },
-      create: {
-        feedbackAppId: "app_1",
-        sourceApp: "ChineseHandCopy",
-        channel: "google_play",
-        installId: "install_19a",
-        device: "iPhone 15 Pro",
-        appVersion: "硬笔临帖 v2.1.4",
-        message: "希望能支持横版纸张",
-        status: "open",
-      },
-      update: {
-        channel: "google_play",
-        device: "iPhone 15 Pro",
-        appVersion: "硬笔临帖 v2.1.4",
-        status: "open",
-        updatedAt: expect.any(Date),
-      },
-      select: { id: true },
-    });
-    expect(mockFeedbackMessageCreate).toHaveBeenCalledWith({
-      data: {
-        feedbackId: "fb_123",
-        senderType: "user",
-        body: "希望能支持横版纸张",
-        appVersion: "硬笔临帖 v2.1.4",
-        ipAddress: "203.0.113.42",
-      },
-      select: { id: true },
-    });
-    expect(mockFeedbackPushEventUpsert).toHaveBeenCalledWith({
-      where: { messageId: "msg_123" },
-      create: {
-        feedbackId: "fb_123",
-        messageId: "msg_123",
-      },
-      update: {},
-      select: { id: true },
-    });
+    expect(feedbackAppFindMany).toHaveBeenCalledTimes(1);
+    expect(feedbackThreadFindUnique).not.toHaveBeenCalled();
   });
 
-  it("creates or reuses one thread when sending user messages", async () => {
-    process.env.ADMIN_WEB_PUSH_ENABLED = "true";
-    mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadCreate.mockResolvedValue({ id: "fb_123" });
-    mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
-    mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_123" });
-    mockFeedbackPushEventUpsert.mockResolvedValue({ id: "push_123" });
-    mockTransaction.mockImplementation(async (callback) =>
-      callback({
-        feedbackThread: {
-          upsert: vi.fn().mockResolvedValue({ id: "fb_123" }),
+  it("filters, searches, sorts, and paginates the admin list in memory", async () => {
+    const newer = {
+      ...thread,
+      id: "fb_456",
+      installId: "install_20b",
+      status: "open",
+      updatedAt: new Date("2026-06-25T11:00:00.000Z"),
+      messages: [
+        {
+          ...userMessage,
+          id: "msg_other",
+          feedbackId: "fb_456",
+          body: "需要导出楷书字帖",
+          createdAt: new Date("2026-06-25T11:00:00.000Z"),
         },
-        feedbackMessage: {
-          create: mockFeedbackMessageCreate,
-        },
-        feedbackPushEvent: {
-          upsert: mockFeedbackPushEventUpsert,
-        },
-      }),
+      ],
+    };
+    loadWith([thread, newer]);
+    const { listFeedbackThreadsForAdmin } = await import(
+      "@/lib/feedback/feedbackService"
     );
-    const { sendUserFeedbackMessage } = await import("@/lib/feedback/feedbackService");
+
+    const result = await listFeedbackThreadsForAdmin({
+      status: "open",
+      q: "楷书",
+      page: 1,
+      pageSize: 1,
+    });
+
+    expect(result).toMatchObject({
+      total: 1,
+      hasMore: false,
+      items: [{ id: "fb_456", needsAdminReply: true, messageCount: 1 }],
+    });
+    expect(feedbackAppFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("updates read state in the database and immediately in cache", async () => {
+    feedbackThreadUpdateMany.mockResolvedValue({ count: 1 });
+    const service = await import("@/lib/feedback/feedbackService");
 
     await expect(
-      sendUserFeedbackMessage({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        channel: "google_play",
-        device: "iPhone 15 Pro",
-        installId: "install_19a",
-        appVersion: "硬笔临帖 v2.1.4",
-        ipAddress: "2001:db8::42",
-        message: "补充一下，主要是想横向打印。",
+      service.markCurrentFeedbackThreadRead({
+        sourceApp: app.sourceApp,
+        token: app.token,
+        installId: thread.installId,
       }),
-    ).resolves.toEqual({ id: "msg_123" });
-
-    expect(mockFeedbackMessageCreate).toHaveBeenCalledWith({
-      data: {
-        feedbackId: "fb_123",
-        senderType: "user",
-        body: "补充一下，主要是想横向打印。",
-        appVersion: "硬笔临帖 v2.1.4",
-        ipAddress: "2001:db8::42",
-      },
-      select: { id: true },
-    });
-    expect(mockFeedbackPushEventUpsert).toHaveBeenCalledWith({
-      where: { messageId: "msg_123" },
-      create: {
-        feedbackId: "fb_123",
-        messageId: "msg_123",
-      },
-      update: {},
-      select: { id: true },
-    });
+    ).resolves.toBe(true);
+    await expect(
+      service.getCurrentFeedbackThread({
+        sourceApp: app.sourceApp,
+        token: app.token,
+        installId: thread.installId,
+      }),
+    ).resolves.toMatchObject({ unreadAdminReplyCount: 0 });
+    expect(feedbackAppFindMany).toHaveBeenCalledTimes(1);
   });
 
-  it("lists feedback summaries with unread admin reply counts", async () => {
-    mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadFindMany.mockResolvedValue([
-      {
-        id: "fb_123",
-        message: "希望能支持横版纸张",
+  it("refreshes the affected thread after a user write", async () => {
+    feedbackThreadUpsert.mockResolvedValue({ id: thread.id });
+    feedbackMessageCreate.mockResolvedValue({ id: "msg_new" });
+    enqueueFeedbackPushEvent.mockResolvedValue(undefined);
+    const refreshed = {
+      ...thread,
+      status: "open",
+      updatedAt: new Date("2026-06-26T00:00:00.000Z"),
+      messages: [
+        ...thread.messages,
+        {
+          ...userMessage,
+          id: "msg_new",
+          body: "补充消息",
+          createdAt: new Date("2026-06-26T00:00:00.000Z"),
+        },
+      ],
+    };
+    feedbackThreadFindUnique.mockResolvedValue(refreshed);
+    const service = await import("@/lib/feedback/feedbackService");
+
+    await expect(
+      service.sendUserFeedbackMessage({
+        sourceApp: app.sourceApp,
+        token: app.token,
+        channel: thread.channel,
+        installId: thread.installId,
+        message: "补充消息",
+      }),
+    ).resolves.toEqual({ id: "msg_new" });
+    await expect(service.getFeedbackThreadForAdmin(thread.id)).resolves.toMatchObject({
+      status: "open",
+      messages: [{}, {}, { id: "msg_new", body: "补充消息" }],
+    });
+    expect(feedbackThreadFindUnique).toHaveBeenCalledTimes(1);
+  });
+
+  it("syncs admin reply, edit, status, and deletion paths", async () => {
+    feedbackThreadFindUnique
+      .mockResolvedValueOnce({ id: thread.id })
+      .mockResolvedValueOnce({
+        ...thread,
         status: "replied",
-        userLastReadAt: new Date("2026-06-24T10:30:00.000Z"),
-        lastAdminReplyAt: new Date("2026-06-24T11:00:00.000Z"),
-        createdAt: new Date("2026-06-24T10:00:00.000Z"),
-        updatedAt: new Date("2026-06-24T11:00:00.000Z"),
         messages: [
+          ...thread.messages,
           {
-            id: "msg_old",
-            feedbackId: "fb_123",
-            senderType: "admin",
-            body: "old",
-            createdAt: new Date("2026-06-24T10:20:00.000Z"),
-          },
-          {
-            id: "msg_new",
-            feedbackId: "fb_123",
-            senderType: "admin",
-            body: "new",
-            createdAt: new Date("2026-06-24T11:00:00.000Z"),
+            ...adminMessage,
+            id: "msg_admin_2",
+            body: "第二次回复",
           },
         ],
-      },
-    ]);
-    const { listFeedbackForInstall } = await import("@/lib/feedback/feedbackService");
+      });
+    feedbackMessageCreate.mockResolvedValue({ id: "msg_admin_2" });
+    feedbackThreadUpdate.mockResolvedValue({ id: thread.id });
+    feedbackMessageUpdateMany.mockResolvedValue({ count: 1 });
+    feedbackThreadDeleteMany.mockResolvedValue({ count: 1 });
+    const service = await import("@/lib/feedback/feedbackService");
 
     await expect(
-      listFeedbackForInstall({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
+      service.replyToFeedbackAsAdmin({
+        feedbackId: thread.id,
+        body: "第二次回复",
       }),
-    ).resolves.toEqual([
-      {
-        id: "fb_123",
-        message: "希望能支持横版纸张",
-        status: "replied",
-        createdAt: "2026-06-24T10:00:00.000Z",
-        updatedAt: "2026-06-24T11:00:00.000Z",
-        lastAdminReplyAt: "2026-06-24T11:00:00.000Z",
-        unreadAdminReplyCount: 1,
-      },
-    ]);
-    expect(mockFeedbackThreadFindMany).toHaveBeenCalledWith({
-      where: {
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
-      },
-      include: {
-        messages: {
-          where: { senderType: "admin" },
-          select: {
-            id: true,
-            feedbackId: true,
-            senderType: true,
-            body: true,
-            createdAt: true,
-          },
-        },
-      },
-      orderBy: { updatedAt: "desc" },
+    ).resolves.toEqual({ id: "msg_admin_2" });
+    await service.updateAdminFeedbackMessage({
+      feedbackId: thread.id,
+      messageId: "msg_admin_2",
+      body: "修订回复",
     });
-  });
-
-  it("only marks open conversations with a latest user message as needing a reply", async () => {
-    const baseThread = {
-      message: "用户消息",
-      createdAt: new Date("2026-06-24T10:00:00.000Z"),
-      updatedAt: new Date("2026-06-24T11:00:00.000Z"),
-      lastAdminReplyAt: null,
-      sourceApp: "ChineseHandCopy",
-      installId: "install_19a",
-      channel: "google_play",
-      device: "iPhone 15 Pro",
-      appVersion: "2.1.4",
-      _count: { messages: 1 },
-      messages: [{
-        id: "msg_user",
-        feedbackId: "fb_open",
-        senderType: "user",
-        body: "用户消息",
-        createdAt: new Date("2026-06-24T11:00:00.000Z"),
-      }],
-    };
-    mockFeedbackThreadFindMany.mockResolvedValue([
-      { ...baseThread, id: "fb_open", status: "open" },
-      { ...baseThread, id: "fb_replied", status: "replied" },
-      { ...baseThread, id: "fb_resolved", status: "resolved" },
-    ]);
-    mockFeedbackThreadCount.mockResolvedValue(3);
-    const { listFeedbackThreadsForAdmin } = await import("@/lib/feedback/feedbackService");
-
-    const result = await listFeedbackThreadsForAdmin({ page: 1, pageSize: 20 });
-
-    expect(result.items.map((item) => [item.status, item.needsAdminReply])).toEqual([
-      ["open", true],
-      ["replied", false],
-      ["resolved", false],
-    ]);
-  });
-
-  it("marks replies as read only for the matching install", async () => {
-    mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadUpdateMany.mockResolvedValue({ count: 1 });
-    const { markFeedbackRepliesRead } = await import("@/lib/feedback/feedbackService");
-
-    await expect(
-      markFeedbackRepliesRead({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
-        feedbackId: "fb_123",
-      }),
-    ).resolves.toBe(true);
-
-    expect(mockFeedbackThreadUpdateMany).toHaveBeenCalledWith({
-      where: {
-        id: "fb_123",
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
-      },
-      data: {
-        userLastReadAt: expect.any(Date),
-      },
+    await service.updateFeedbackStatusAsAdmin({
+      feedbackId: thread.id,
+      status: "resolved",
     });
-  });
-
-  it("marks the current install thread as read", async () => {
-    mockFeedbackAppFindUnique.mockResolvedValue(app);
-    mockFeedbackThreadUpdateMany.mockResolvedValue({ count: 1 });
-    const { markCurrentFeedbackThreadRead } = await import("@/lib/feedback/feedbackService");
-
-    await expect(
-      markCurrentFeedbackThreadRead({
-        token: "valid-token",
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
-      }),
-    ).resolves.toBe(true);
-
-    expect(mockFeedbackThreadUpdateMany).toHaveBeenCalledWith({
-      where: {
-        sourceApp: "ChineseHandCopy",
-        installId: "install_19a",
-      },
-      data: {
-        userLastReadAt: expect.any(Date),
-      },
+    await expect(service.getFeedbackThreadForAdmin(thread.id)).resolves.toMatchObject({
+      status: "resolved",
+      messages: [{}, {}, { id: "msg_admin_2", body: "修订回复" }],
     });
-  });
 
-  it("creates an admin reply and marks the thread replied", async () => {
-    mockFeedbackThreadFindUnique.mockResolvedValue({ id: "fb_123" });
-    mockFeedbackMessageCreate.mockResolvedValue({ id: "msg_admin_1" });
-    mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
-    mockTransaction.mockImplementation(async (callback) =>
-      callback({
-        feedbackThread: {
-          findUnique: mockFeedbackThreadFindUnique,
-          update: mockFeedbackThreadUpdate,
-        },
-        feedbackMessage: {
-          create: mockFeedbackMessageCreate,
-        },
-      }),
-    );
-    const { replyToFeedbackAsAdmin } = await import("@/lib/feedback/feedbackService");
-
-    await expect(
-      replyToFeedbackAsAdmin({
-        feedbackId: "fb_123",
-        body: "已记录，会放入后续版本评估。",
-      }),
-    ).resolves.toEqual({ id: "msg_admin_1" });
-
-    expect(mockFeedbackMessageCreate).toHaveBeenCalledWith({
-      data: {
-        feedbackId: "fb_123",
-        senderType: "admin",
-        body: "已记录，会放入后续版本评估。",
-      },
-      select: { id: true },
-    });
-    expect(mockFeedbackThreadUpdate).toHaveBeenCalledWith({
-      where: { id: "fb_123" },
-      data: {
-        status: "replied",
-        lastAdminReplyAt: expect.any(Date),
-        updatedAt: expect.any(Date),
-      },
-    });
-  });
-
-  it("deletes a feedback thread for admin", async () => {
-    mockFeedbackThreadDeleteMany.mockResolvedValue({ count: 1 });
-    const { deleteFeedbackThreadAsAdmin } = await import("@/lib/feedback/feedbackService");
-
-    await expect(deleteFeedbackThreadAsAdmin("fb_123")).resolves.toBe(true);
-
-    expect(mockFeedbackThreadDeleteMany).toHaveBeenCalledWith({
-      where: { id: "fb_123" },
-    });
-  });
-
-  it("updates only admin-authored messages", async () => {
-    mockFeedbackMessageUpdateMany.mockResolvedValue({ count: 1 });
-    mockFeedbackThreadUpdate.mockResolvedValue({ id: "fb_123" });
-    const { updateAdminFeedbackMessage } = await import("@/lib/feedback/feedbackService");
-
-    await expect(
-      updateAdminFeedbackMessage({
-        feedbackId: "fb_123",
-        messageId: "msg_admin_1",
-        body: "更新后的回复",
-      }),
-    ).resolves.toEqual({ id: "fb_123" });
-
-    expect(mockFeedbackMessageUpdateMany).toHaveBeenCalledWith({
-      where: {
-        id: "msg_admin_1",
-        feedbackId: "fb_123",
-        senderType: "admin",
-      },
-      data: {
-        body: "更新后的回复",
-      },
-    });
+    await expect(service.deleteFeedbackThreadAsAdmin(thread.id)).resolves.toBe(true);
+    await expect(service.getFeedbackThreadForAdmin(thread.id)).resolves.toBeNull();
+    expect(feedbackAppFindMany).toHaveBeenCalledTimes(1);
   });
 });

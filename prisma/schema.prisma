@@ -159,6 +159,14 @@ model FeedbackMessage {
   @@map("feedback_messages")
 }
 
+model FeedbackMetric {
+  key       String   @id
+  total     BigInt   @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@map("feedback_metrics")
+}
+
 model AdminPushSubscription {
   id               String                 @id @default(cuid())
   endpoint         String                 @db.Text

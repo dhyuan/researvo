@@ -1,3 +1,15 @@
+import {
+  deleteFeedbackThreadFromCache,
+  ensureFeedbackCacheReady,
+  getAllFeedbackThreadsFromCache,
+  getFeedbackAppFromCache,
+  getFeedbackThreadForInstallFromCache,
+  getFeedbackThreadFromCache,
+  markFeedbackCacheNotReady,
+  updateFeedbackThreadInCache,
+  upsertFeedbackThreadInCache,
+  type FeedbackCacheThread,
+} from "@/lib/feedback/feedbackCache";
 import { prisma } from "@/lib/persistence/repositories";
 import {
   enqueueFeedbackPushEvent,
@@ -63,34 +75,12 @@ export type AdminFeedbackMessageUpdateInput = {
   body: string;
 };
 
-type FeedbackThreadWithMessages = Awaited<
-  ReturnType<typeof prisma.feedbackThread.findFirst>
-> & {
-  messages?: Array<{
-    id: string;
-    feedbackId: string;
-    senderType: string;
-    body: string;
-    createdAt: Date;
-  }>;
-};
-
-async function findAuthorizedApp(sourceApp: string, token: string) {
-  const app = await prisma.feedbackApp.findUnique({
-    where: { sourceApp },
-  });
-
-  if (!app || app.token !== token) {
-    return null;
-  }
-
-  return app;
+export async function findAuthorizedApp(sourceApp: string, token: string) {
+  const app = await getFeedbackAppFromCache(sourceApp);
+  return app?.token === token ? app : null;
 }
 
-function countUnreadAdminReplies(thread: {
-  userLastReadAt: Date | null;
-  messages: Array<{ senderType: string; createdAt: Date }>;
-}) {
+function countUnreadAdminReplies(thread: FeedbackCacheThread) {
   return thread.messages.filter((message) => {
     if (message.senderType !== "admin") {
       return false;
@@ -100,7 +90,7 @@ function countUnreadAdminReplies(thread: {
   }).length;
 }
 
-function serializeThreadSummary(thread: NonNullable<FeedbackThreadWithMessages>) {
+function serializeThreadSummary(thread: FeedbackCacheThread) {
   return {
     id: thread.id,
     message: thread.message,
@@ -108,16 +98,49 @@ function serializeThreadSummary(thread: NonNullable<FeedbackThreadWithMessages>)
     createdAt: thread.createdAt.toISOString(),
     updatedAt: thread.updatedAt.toISOString(),
     lastAdminReplyAt: thread.lastAdminReplyAt?.toISOString() ?? null,
-    unreadAdminReplyCount: countUnreadAdminReplies({
-      userLastReadAt: thread.userLastReadAt,
-      messages: thread.messages ?? [],
-    }),
+    unreadAdminReplyCount: countUnreadAdminReplies(thread),
   };
+}
+
+function serializeClientThread(thread: FeedbackCacheThread) {
+  return {
+    ...serializeThreadSummary(thread),
+    messages: thread.messages.map((message) => ({
+      id: message.id,
+      feedbackId: message.feedbackId,
+      senderType: message.senderType,
+      body: message.body,
+      createdAt: message.createdAt.toISOString(),
+    })),
+  };
+}
+
+async function refreshFeedbackThreadAfterWrite(feedbackId: string) {
+  try {
+    const thread = await prisma.feedbackThread.findUnique({
+      where: { id: feedbackId },
+      include: {
+        messages: {
+          orderBy: { createdAt: "asc" },
+        },
+      },
+    });
+
+    if (!thread) {
+      deleteFeedbackThreadFromCache(feedbackId);
+      return;
+    }
+
+    if (!upsertFeedbackThreadInCache(thread as FeedbackCacheThread)) {
+      markFeedbackCacheNotReady("thread refresh found no ready snapshot");
+    }
+  } catch (error) {
+    markFeedbackCacheNotReady("thread refresh failed after database write", error);
+  }
 }
 
 export async function submitFeedback(input: SubmitFeedbackInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
@@ -149,9 +172,7 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
         status: "open",
         updatedAt: now,
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
     const message = await tx.feedbackMessage.create({
@@ -172,18 +193,18 @@ export async function submitFeedback(input: SubmitFeedbackInput) {
     return { ...thread, userMessageId: message.id };
   });
 
+  await refreshFeedbackThreadAfterWrite(thread.id);
   triggerPushDispatch();
   return thread;
 }
 
 export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
-  const message = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const now = new Date();
     const thread = await tx.feedbackThread.upsert({
       where: {
@@ -209,9 +230,7 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
         status: "open",
         updatedAt: now,
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
     const message = await tx.feedbackMessage.create({
@@ -222,144 +241,81 @@ export async function sendUserFeedbackMessage(input: SendUserFeedbackMessageInpu
         appVersion: input.appVersion,
         ipAddress: input.ipAddress,
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
 
     await enqueueFeedbackPushEvent(tx, {
       feedbackId: thread.id,
       messageId: message.id,
     });
-    return message;
+    return { message, feedbackId: thread.id };
   });
 
+  await refreshFeedbackThreadAfterWrite(result.feedbackId);
   triggerPushDispatch();
-  return message;
+  return result.message;
 }
 
 export async function listFeedbackForInstall(input: FeedbackInstallInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
-  const threads = await prisma.feedbackThread.findMany({
-    where: {
-      sourceApp: app.sourceApp,
-      installId: input.installId,
-    },
-    include: {
-      messages: {
-        where: { senderType: "admin" },
-        select: {
-          id: true,
-          feedbackId: true,
-          senderType: true,
-          body: true,
-          createdAt: true,
-        },
-      },
-    },
-    orderBy: { updatedAt: "desc" },
-  });
-
-  return threads.map(serializeThreadSummary);
+  const thread = await getFeedbackThreadForInstallFromCache(
+    app.sourceApp,
+    input.installId,
+  );
+  return thread ? [serializeThreadSummary(thread)] : [];
 }
 
 export async function getFeedbackDetail(input: FeedbackDetailInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
-  const thread = await prisma.feedbackThread.findFirst({
-    where: {
-      id: input.feedbackId,
-      sourceApp: app.sourceApp,
-      installId: input.installId,
-    },
-    include: {
-      messages: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          feedbackId: true,
-          senderType: true,
-          body: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
-
-  if (!thread) {
+  const thread = await getFeedbackThreadFromCache(input.feedbackId);
+  if (
+    !thread ||
+    thread.sourceApp !== app.sourceApp ||
+    thread.installId !== input.installId
+  ) {
     return null;
   }
 
-  return {
-    ...serializeThreadSummary(thread),
-    messages: thread.messages.map((message) => ({
-      id: message.id,
-      feedbackId: message.feedbackId,
-      senderType: message.senderType,
-      body: message.body,
-      createdAt: message.createdAt.toISOString(),
-    })),
-  };
+  return serializeClientThread(thread);
 }
 
 export async function getCurrentFeedbackThread(input: FeedbackInstallInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
-  const thread = await prisma.feedbackThread.findFirst({
-    where: {
-      sourceApp: app.sourceApp,
-      installId: input.installId,
-    },
-    include: {
-      messages: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          feedbackId: true,
-          senderType: true,
-          body: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
-
-  if (!thread) {
-    return null;
-  }
-
-  return {
-    ...serializeThreadSummary(thread),
-    messages: thread.messages.map((message) => ({
-      id: message.id,
-      feedbackId: message.feedbackId,
-      senderType: message.senderType,
-      body: message.body,
-      createdAt: message.createdAt.toISOString(),
-    })),
-  };
+  const thread = await getFeedbackThreadForInstallFromCache(
+    app.sourceApp,
+    input.installId,
+  );
+  return thread ? serializeClientThread(thread) : null;
 }
 
 export async function markFeedbackRepliesRead(input: FeedbackDetailInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
+  const cached = await getFeedbackThreadFromCache(input.feedbackId);
+  if (
+    !cached ||
+    cached.sourceApp !== app.sourceApp ||
+    cached.installId !== input.installId
+  ) {
+    return false;
+  }
+
+  const readAt = new Date();
   const result = await prisma.feedbackThread.updateMany({
     where: {
       id: input.feedbackId,
@@ -367,40 +323,72 @@ export async function markFeedbackRepliesRead(input: FeedbackDetailInput) {
       installId: input.installId,
     },
     data: {
-      userLastReadAt: new Date(),
+      userLastReadAt: readAt,
+      updatedAt: readAt,
     },
   });
 
+  if (result.count > 0) {
+    if (
+      !updateFeedbackThreadInCache(input.feedbackId, (thread) => ({
+        ...thread,
+        userLastReadAt: readAt,
+        updatedAt: readAt,
+      }))
+    ) {
+      markFeedbackCacheNotReady("failed to update read state");
+    }
+  }
   return result.count > 0;
 }
 
 export async function markCurrentFeedbackThreadRead(input: FeedbackInstallInput) {
   const app = await findAuthorizedApp(input.sourceApp, input.token);
-
   if (!app) {
     return null;
   }
 
+  const cached = await getFeedbackThreadForInstallFromCache(
+    app.sourceApp,
+    input.installId,
+  );
+  if (!cached) {
+    return false;
+  }
+
+  const readAt = new Date();
   const result = await prisma.feedbackThread.updateMany({
     where: {
       sourceApp: app.sourceApp,
       installId: input.installId,
     },
     data: {
-      userLastReadAt: new Date(),
+      userLastReadAt: readAt,
+      updatedAt: readAt,
     },
   });
 
+  if (result.count > 0) {
+    if (
+      !updateFeedbackThreadInCache(cached.id, (thread) => ({
+        ...thread,
+        userLastReadAt: readAt,
+        updatedAt: readAt,
+      }))
+    ) {
+      markFeedbackCacheNotReady("failed to update current thread read state");
+    }
+  }
   return result.count > 0;
 }
 
 export async function replyToFeedbackAsAdmin(input: AdminFeedbackReplyInput) {
-  return prisma.$transaction(async (tx) => {
+  await ensureFeedbackCacheReady();
+  const result = await prisma.$transaction(async (tx) => {
     const thread = await tx.feedbackThread.findUnique({
       where: { id: input.feedbackId },
       select: { id: true },
     });
-
     if (!thread) {
       return null;
     }
@@ -412,11 +400,8 @@ export async function replyToFeedbackAsAdmin(input: AdminFeedbackReplyInput) {
         senderType: "admin",
         body: input.body,
       },
-      select: {
-        id: true,
-      },
+      select: { id: true },
     });
-
     await tx.feedbackThread.update({
       where: { id: input.feedbackId },
       data: {
@@ -425,59 +410,41 @@ export async function replyToFeedbackAsAdmin(input: AdminFeedbackReplyInput) {
         updatedAt: now,
       },
     });
-
     return message;
   });
+
+  if (result) {
+    await refreshFeedbackThreadAfterWrite(input.feedbackId);
+  }
+  return result;
 }
 
 export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput) {
-  const where = {
-    sourceApp: input.sourceApp,
-    status: input.status,
-    channel: input.channel,
-    OR: input.q
-      ? [
-          { message: { contains: input.q, mode: "insensitive" as const } },
-          { sourceApp: { contains: input.q, mode: "insensitive" as const } },
-          { installId: { contains: input.q, mode: "insensitive" as const } },
-          {
-            messages: {
-              some: { body: { contains: input.q, mode: "insensitive" as const } },
-            },
-          },
-        ]
-      : undefined,
-  };
+  const query = input.q?.toLocaleLowerCase();
+  const matching = (await getAllFeedbackThreadsFromCache())
+    .filter((thread) => {
+      if (input.sourceApp && thread.sourceApp !== input.sourceApp) return false;
+      if (input.status && thread.status !== input.status) return false;
+      if (input.channel && thread.channel !== input.channel) return false;
+      if (!query) return true;
+      return (
+        thread.message.toLocaleLowerCase().includes(query) ||
+        thread.sourceApp.toLocaleLowerCase().includes(query) ||
+        thread.installId.toLocaleLowerCase().includes(query) ||
+        thread.messages.some((message) =>
+          message.body.toLocaleLowerCase().includes(query),
+        )
+      );
+    })
+    .sort((left, right) => right.updatedAt.getTime() - left.updatedAt.getTime());
 
-  const [threads, total] = await Promise.all([
-    prisma.feedbackThread.findMany({
-      where,
-      include: {
-        messages: {
-          orderBy: { createdAt: "desc" as const },
-          take: 1,
-          select: {
-            id: true,
-            feedbackId: true,
-            senderType: true,
-            body: true,
-            createdAt: true,
-          },
-        },
-        _count: {
-          select: { messages: true },
-        },
-      },
-      orderBy: { updatedAt: "desc" },
-      skip: (input.page - 1) * input.pageSize,
-      take: input.pageSize,
-    }),
-    prisma.feedbackThread.count({ where }),
-  ]);
+  const total = matching.length;
+  const start = (input.page - 1) * input.pageSize;
+  const threads = matching.slice(start, start + input.pageSize);
 
   return {
     items: threads.map((thread) => {
-      const latestMessage = thread.messages[0] ?? null;
+      const latestMessage = thread.messages.at(-1) ?? null;
       return {
         id: thread.id,
         message: latestMessage?.body ?? thread.message,
@@ -490,7 +457,7 @@ export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput)
         channel: thread.channel,
         device: thread.device,
         appVersion: thread.appVersion,
-        messageCount: thread._count.messages,
+        messageCount: thread.messages.length,
         latestMessage: latestMessage
           ? {
               body: latestMessage.body,
@@ -498,7 +465,8 @@ export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput)
               createdAt: latestMessage.createdAt.toISOString(),
             }
           : null,
-        needsAdminReply: thread.status === "open" && latestMessage?.senderType === "user",
+        needsAdminReply:
+          thread.status === "open" && latestMessage?.senderType === "user",
       };
     }),
     page: input.page,
@@ -509,25 +477,7 @@ export async function listFeedbackThreadsForAdmin(input: AdminFeedbackListInput)
 }
 
 export async function getFeedbackThreadForAdmin(feedbackId: string) {
-  const thread = await prisma.feedbackThread.findUnique({
-    where: { id: feedbackId },
-    include: {
-      messages: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          feedbackId: true,
-          senderType: true,
-          body: true,
-          appVersion: true,
-          ipAddress: true,
-          ipLocation: true,
-          createdAt: true,
-        },
-      },
-    },
-  });
-
+  const thread = await getFeedbackThreadFromCache(feedbackId);
   if (!thread) {
     return null;
   }
@@ -545,55 +495,88 @@ export async function getFeedbackThreadForAdmin(feedbackId: string) {
     updatedAt: thread.updatedAt.toISOString(),
     lastAdminReplyAt: thread.lastAdminReplyAt?.toISOString() ?? null,
     messages: thread.messages.map((message) => ({
-      ...message,
+      id: message.id,
+      feedbackId: message.feedbackId,
+      senderType: message.senderType,
+      body: message.body,
+      appVersion: message.appVersion,
+      ipAddress: message.ipAddress,
+      ipLocation: message.ipLocation,
       createdAt: message.createdAt.toISOString(),
     })),
   };
 }
 
 export async function deleteFeedbackThreadAsAdmin(feedbackId: string) {
+  await ensureFeedbackCacheReady();
   const result = await prisma.feedbackThread.deleteMany({
     where: { id: feedbackId },
   });
-
+  if (result.count > 0 && !deleteFeedbackThreadFromCache(feedbackId)) {
+    markFeedbackCacheNotReady("failed to delete thread from cache");
+  }
   return result.count > 0;
 }
 
-export async function updateAdminFeedbackMessage(input: AdminFeedbackMessageUpdateInput) {
+export async function updateAdminFeedbackMessage(
+  input: AdminFeedbackMessageUpdateInput,
+) {
+  await ensureFeedbackCacheReady();
   const message = await prisma.feedbackMessage.updateMany({
     where: {
       id: input.messageId,
       feedbackId: input.feedbackId,
       senderType: "admin",
     },
-    data: {
-      body: input.body,
-    },
+    data: { body: input.body },
   });
-
   if (message.count === 0) {
     return null;
   }
 
+  const updatedAt = new Date();
+  const thread = await prisma.feedbackThread.update({
+    where: { id: input.feedbackId },
+    data: { updatedAt },
+    select: { id: true },
+  });
+
+  if (
+    !updateFeedbackThreadInCache(input.feedbackId, (cached) => ({
+      ...cached,
+      updatedAt,
+      messages: cached.messages.map((item) =>
+        item.id === input.messageId ? { ...item, body: input.body } : item,
+      ),
+    }))
+  ) {
+    markFeedbackCacheNotReady("failed to update admin message in cache");
+  }
+  return thread;
+}
+
+export async function updateFeedbackStatusAsAdmin(
+  input: AdminFeedbackStatusInput,
+) {
+  await ensureFeedbackCacheReady();
+  const updatedAt = new Date();
   const thread = await prisma.feedbackThread.update({
     where: { id: input.feedbackId },
     data: {
-      updatedAt: new Date(),
+      status: input.status,
+      updatedAt,
     },
     select: { id: true },
   });
 
-  return thread;
-}
-
-export async function updateFeedbackStatusAsAdmin(input: AdminFeedbackStatusInput) {
-  return prisma.feedbackThread.update({
-    where: { id: input.feedbackId },
-    data: {
+  if (
+    !updateFeedbackThreadInCache(input.feedbackId, (cached) => ({
+      ...cached,
       status: input.status,
-    },
-    select: {
-      id: true,
-    },
-  });
+      updatedAt,
+    }))
+  ) {
+    markFeedbackCacheNotReady("failed to update feedback status in cache");
+  }
+  return thread;
 }

@@ -1,4 +1,8 @@
 import { prisma } from "@/lib/persistence/repositories";
+import {
+  markFeedbackCacheNotReady,
+  updateFeedbackMessageInCache,
+} from "@/lib/feedback/feedbackCache";
 
 type IpWhoisResponse = {
   success?: boolean;
@@ -129,12 +133,21 @@ export async function enrichMessageIpLocation(messageId: string, ipAddress?: str
   }
 
   try {
-    await prisma.feedbackMessage.updateMany({
+    const result = await prisma.feedbackMessage.updateMany({
       where: { id: messageId },
       data: {
         ipLocation: location,
       },
     });
+    if (
+      result.count > 0 &&
+      !updateFeedbackMessageInCache(messageId, (message) => ({
+        ...message,
+        ipLocation: location,
+      }))
+    ) {
+      markFeedbackCacheNotReady("failed to update IP location in cache");
+    }
   } catch {
     // Feedback submission should never be affected by best-effort enrichment.
   }

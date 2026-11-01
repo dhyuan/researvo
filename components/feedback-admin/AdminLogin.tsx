@@ -39,7 +39,6 @@ function getSafeAdminDestination() {
 export function AdminLogin() {
   const router = useRouter();
   const [session, setSession] = useState<SessionState | null>(null);
-  const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -56,6 +55,7 @@ export function AdminLogin() {
 
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const token = String(new FormData(event.currentTarget).get("password") ?? "");
     setSubmitting(true);
     setError(null);
 
@@ -136,7 +136,8 @@ export function AdminLogin() {
               ，然后重新启动服务。
             </div>
           ) : (
-            <form className="space-y-5" onSubmit={submit}>
+            <form id="admin-login" autoComplete="on" className="space-y-5" onSubmit={submit}>
+              <input type="hidden" name="username" autoComplete="username" value="admin" />
               <div className="space-y-2">
                 <label className="text-sm font-medium text-[#29342f]" htmlFor="admin-token">
                   管理访问密钥
@@ -146,10 +147,10 @@ export function AdminLogin() {
                   autoFocus
                   className="h-11 bg-white px-3"
                   id="admin-token"
-                  onChange={(event) => setToken(event.target.value)}
+                  name="password"
+                  required
                   placeholder="输入访问密钥"
                   type="password"
-                  value={token}
                 />
                 <p className="text-xs leading-5 text-[#758079]">登录成功后，密钥不会保存在浏览器脚本或地址栏中。</p>
               </div>
@@ -160,7 +161,7 @@ export function AdminLogin() {
                 </p>
               ) : null}
 
-              <Button className="h-11 w-full justify-between px-4" disabled={!token || submitting} type="submit">
+              <Button className="h-11 w-full justify-between px-4" disabled={submitting} type="submit">
                 <span>{submitting ? "正在验证…" : "进入工作台"}</span>
                 <ArrowRight size={17} weight="bold" />
               </Button>

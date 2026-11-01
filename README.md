@@ -57,7 +57,11 @@ PUSH_DISPATCH_SECRET="use-a-separate-long-random-secret"
 ```
 
 Never expose the VAPID private key or dispatcher secret through a
-`NEXT_PUBLIC_` variable. Push delivery uses a transactional outbox. Configure
+`NEXT_PUBLIC_` variable. Push delivery uses a transactional outbox. New
+messages schedule delivery with Next.js `after()` so the request lifetime
+includes the background send; each run also processes queued events. This
+is still bounded by the deployment function timeout and does not replace
+a retry scheduler. Configure
 the production scheduler to call the protected drain endpoint every minute:
 
 ```bash
@@ -69,16 +73,30 @@ curl --fail-with-body --request POST \
 The endpoint also accepts the secret through `X-Push-Dispatch-Secret`. Do not
 put this secret in a query string or client-side code.
 
+On iPhone, open the installed Admin app, enable reminders, and use **发送测试**
+to verify delivery (including while the app is in the background). Explicitly
+signing out unsubscribes that device; enable reminders again after signing in.
+Session expiry alone does not unsubscribe it.
+
+The login form supports password managers through `username` and
+`current-password` autocomplete hints. It reads the current form value at
+submission, including passwords filled without React input events. For Chrome
+passwords in the iPhone Home Screen app, select Chrome as a provider in iOS
+AutoFill settings. The website cannot force the system password suggestions
+to appear; verify this on a physical iPhone after deployment.
+
 Apply the database migration before enabling the feature. Rotating the VAPID
 key pair requires every device to subscribe again. Rotating
 `FEEDBACK_ADMIN_TOKEN` invalidates existing Admin sessions and stops delivery
 to subscriptions created under the previous token version; sign in and enable
 reminders again on each intended device.
 
-Set `DATABASE_URL` to a PostgreSQL database:
+Set `DATABASE_URL` to Neon’s pooled endpoint for application traffic and
+`DIRECT_URL` to the corresponding direct endpoint for Prisma migrations:
 
 ```bash
-DATABASE_URL="postgresql://postgres:postgres@localhost:5432/humansignal?schema=public"
+DATABASE_URL="postgresql://postgres:password@ep-example-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require"
+DIRECT_URL="postgresql://postgres:password@ep-example.us-east-1.aws.neon.tech/neondb?sslmode=require"
 ```
 
 Production deployments should apply committed migrations with:

@@ -17,8 +17,9 @@ prisma/migrations/20260724000000_feedback_message_ip_location/migration.sql
 ```bash
 # 1. 可选但推荐：先在 Neon 创建一个分支/备份点
 
-# 2. 确认 DATABASE_URL 指向你要迁移的 Neon 数据库
-echo $DATABASE_URL
+# 2. 确认 DIRECT_URL 指向要迁移的 Neon direct endpoint
+#    DATABASE_URL 应使用带 `-pooler` 的 endpoint，供应用运行时访问
+echo $DIRECT_URL
 
 # 3. 应用 migration
 npm run prisma:migrate:deploy

@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { after } from "next/server";
 
 export async function enqueueFeedbackPushEvent(
   tx: Prisma.TransactionClient,
@@ -24,9 +25,13 @@ export function triggerPushDispatch() {
     return;
   }
 
-  void import("@/lib/push/pushDispatcher")
-    .then(({ drainPushOutbox }) => drainPushOutbox({ limit: 1 }))
-    .catch(() => {
-      console.error("Best-effort Web Push dispatch failed; event remains in outbox");
-    });
+  // Register with Next's request lifetime so serverless hosts keep delivery alive.
+  after(async () => {
+    try {
+      const { drainPushOutbox } = await import("@/lib/push/pushDispatcher");
+      await drainPushOutbox({ limit: 5 });
+    } catch {
+      console.error("Web Push dispatch failed; event remains in outbox for retry");
+    }
+  });
 }
